@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+data/raw/
+data/processed/
+models/
+downloaded_files/
+src/downloaded_files/
+notebooks/figures/
+.env
+*.env
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
