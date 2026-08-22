@@ -319,7 +319,6 @@ def print_prediction(
                     f"({p['goals']}g, {p['assists']}a)"
                 )
     print(f"\n  {match_player_preds.get('sot_disclaimer', '')}")
-    print(f"\n  {match_player_preds.get('sot_disclaimer', '')}")
 
     # Section 3b: MOTM candidates
     print(f"\n{line}")
@@ -372,19 +371,22 @@ def print_prediction(
     print(f"\n{line}")
     print("PREDIKSI CORNER")
     print(line)
-    print(f"Model   : Poisson corner model")
-    exp_home, exp_away = expected_corners(corner_grid)
-    ou = corner_over_under(corner_grid, threshold=corner_threshold)
-    print(f"  Expected corners")
-    print(f"    {home_team:<30}: {exp_home:.2f}")
-    print(f"    {away_team:<30}: {exp_away:.2f}")
-    print(f"  Total expected                    : {exp_home + exp_away:.2f}")
-    print(f"  Over {ou['threshold']:.0f} corners                     : {ou['over']:.2%}")
-    print(f"  Under {ou['threshold']:.0f} corners                    : {ou['under']:.2%}")
-    if corner_cold_start:
-        print("  (Memakai prior rata-rata liga untuk cold-start tim)")
-    print("  Akurasi model corner LEBIH RENDAH dari model gol")
-    print("  karena corner lebih noisy/random (taktik, gaya main, dll).")
+    if corner_grid is None:
+        print("  Model corner tidak tersedia - prediksi dilewati.")
+    else:
+        print(f"Model   : Poisson corner model")
+        exp_home, exp_away = expected_corners(corner_grid)
+        ou = corner_over_under(corner_grid, threshold=corner_threshold)
+        print(f"  Expected corners")
+        print(f"    {home_team:<30}: {exp_home:.2f}")
+        print(f"    {away_team:<30}: {exp_away:.2f}")
+        print(f"  Total expected                    : {exp_home + exp_away:.2f}")
+        print(f"  Over {ou['threshold']:.0f} corners                     : {ou['over']:.2%}")
+        print(f"  Under {ou['threshold']:.0f} corners                    : {ou['under']:.2%}")
+        if corner_cold_start:
+            print("  (Memakai prior rata-rata liga untuk cold-start tim)")
+        print("  Akurasi model corner LEBIH RENDAH dari model gol")
+        print("  karena corner lebih noisy/random (taktik, gaya main, dll).")
 
     # Section 5: Warnings
     all_warnings = list(warnings)
@@ -507,26 +509,30 @@ def main() -> None:
             "disclaimer": f"Tidak dapat memuat data ({exc})",
         }
 
-    # 5. Yellow card predictions
+    # Yellow card predictions
     YELLOW_THRESHOLD = 4.5
     try:
-        from discipline_model import predict_discipline_fixture
         yellow_model = pb.models.PoissonGoalsModel.load(
             str(PROJECT_ROOT / "models" / "yellow_card_model.pkl")
         )
-        yellow_grid, yellow_cold_start = predict_discipline_fixture(
+        yellow_grid, yellow_cold_start = predict_yellow_fixture(
             yellow_model, home_team, away_team
         )
-    except Exception:
-        import numpy as np
+    except (OSError, ValueError, KeyError, AttributeError) as exc:
+        print(f"Peringatan: prediksi kartu kuning dilewati ({exc})")
         yellow_grid = None
         yellow_cold_start = False
 
-    # 4. Corner predictions
-    corner_model = load_corner_model()
-    corner_grid, corner_cold_start = predict_corner_fixture(
-        corner_model, home_team, away_team
-    )
+    # Corner predictions
+    try:
+        corner_model = load_corner_model()
+        corner_grid, corner_cold_start = predict_corner_fixture(
+            corner_model, home_team, away_team
+        )
+    except (OSError, ValueError, KeyError, AttributeError) as exc:
+        print(f"Peringatan: prediksi corner dilewati ({exc})")
+        corner_grid = None
+        corner_cold_start = False
     corner_threshold = 9.5
 
     # Warnings

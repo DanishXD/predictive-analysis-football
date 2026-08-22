@@ -298,6 +298,13 @@ def main() -> None:
     phase5_rf = phase5_metrics.loc[phase5_metrics["model"] == "random_forest"].iloc[0]
     metrics["phase5_rf_test_log_loss_reference"] = phase5_rf["test_log_loss"]
     metrics["phase5_rf_test_accuracy_reference"] = phase5_rf["test_accuracy"]
+
+    probabilities_valid = np.allclose(
+        stacked_probabilities.sum(axis=1), 1.0, atol=1e-7
+    ) and np.allclose(baseline_probabilities.sum(axis=1), 1.0, atol=1e-7)
+    if not probabilities_valid or len(stacked_test) != len(test):
+        raise ValueError("Validasi output stacking gagal")
+
     metrics.to_csv(STACKING_METRICS_PATH, index=False)
 
     prediction_output = stacked_test[
@@ -333,12 +340,6 @@ def main() -> None:
         ),
     }
     METADATA_PATH.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-
-    probabilities_valid = np.allclose(
-        stacked_probabilities.sum(axis=1), 1.0, atol=1e-7
-    ) and np.allclose(baseline_probabilities.sum(axis=1), 1.0, atol=1e-7)
-    if not probabilities_valid or len(prediction_output) != len(test):
-        raise ValueError("Validasi output stacking gagal")
 
     print("\nControlled comparison:")
     print(
