@@ -77,12 +77,15 @@ def expected_cards(grid):
 
 
 def over_under_probability(grid, threshold: float):
-    """Compute P(over threshold) and P(under threshold) for total cards."""
+    """Compute P(over threshold), P(under threshold) and push for total cards."""
     total_dist = grid.total_goals_distribution()
     min_total = int(np.floor(threshold))
+    is_whole_number = threshold == min_total
     over = float(sum(total_dist[min_total + 1 :]))
-    under = float(sum(total_dist[: min_total + 1]))
-    push = total_dist[min_total] if threshold == min_total else 0.0
+    push = float(total_dist[min_total]) if is_whole_number else 0.0
+    under = float(
+        sum(total_dist[:min_total] if is_whole_number else total_dist[: min_total + 1])
+    )
     return {"over": over, "under": under, "push": push, "threshold": threshold}
 
 
