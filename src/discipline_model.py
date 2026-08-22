@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import penaltyblog as pb
 
-from config import TEST_SEASON, TIME_DECAY_XI, YELLOW_OVER_UNDER_DEFAULT
+from config import (
+    MODELS_DIR,
+    PROCESSED_DIR,
+    TEST_SEASON,
+    TIME_DECAY_XI,
+    YELLOW_OVER_UNDER_DEFAULT,
+)
 from team_mapping import TEAM_NAME_MAPPING
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
-MODELS_DIR = PROJECT_ROOT / "models"
+INPUT_PATH = PROCESSED_DIR / "matches_clean.csv"
 YELLOW_MODEL_PATH = MODELS_DIR / "yellow_card_model.pkl"
 RED_MODEL_PATH = MODELS_DIR / "red_card_model.pkl"
 

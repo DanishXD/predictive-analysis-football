@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import joblib
 import numpy as np
@@ -11,35 +10,26 @@ import pandas as pd
 from sklearn.base import clone
 from sklearn.metrics import accuracy_score, f1_score, log_loss
 
-from statistical_models import fit_goal_models, predict_fixture
-from train_model import (
+from config import (
+    BOOTSTRAP_SAMPLES,
+    MODELS_DIR,
+    PROCESSED_DIR,
     RANDOM_STATE,
     TARGET_MAPPING,
     TARGET_NAMES,
     TEST_SEASON,
-    build_models,
-    date_based_time_splits,
-    load_modeling_data,
 )
+from statistical_models import fit_goal_models, predict_fixture
+from train_model import build_models, date_based_time_splits, load_modeling_data
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MATCHES_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
-PHASE4_PROBABILITIES_PATH = (
-    PROJECT_ROOT / "data" / "processed" / "test_match_probabilities.csv"
-)
-PHASE5_METRICS_PATH = PROJECT_ROOT / "data" / "processed" / "ml_model_metrics.csv"
-STACKING_FEATURES_PATH = (
-    PROJECT_ROOT / "data" / "processed" / "stacking_expected_goals.csv"
-)
-STACKING_METRICS_PATH = (
-    PROJECT_ROOT / "data" / "processed" / "stacking_model_metrics.csv"
-)
-STACKING_PREDICTIONS_PATH = (
-    PROJECT_ROOT / "data" / "processed" / "stacking_test_predictions.csv"
-)
-MODEL_PATH = PROJECT_ROOT / "models" / "stacked_random_forest.pkl"
-METADATA_PATH = PROJECT_ROOT / "models" / "stacked_random_forest_metadata.json"
+PHASE4_PROBABILITIES_PATH = PROCESSED_DIR / "test_match_probabilities.csv"
+PHASE5_METRICS_PATH = PROCESSED_DIR / "ml_model_metrics.csv"
+STACKING_FEATURES_PATH = PROCESSED_DIR / "stacking_expected_goals.csv"
+STACKING_METRICS_PATH = PROCESSED_DIR / "stacking_model_metrics.csv"
+STACKING_PREDICTIONS_PATH = PROCESSED_DIR / "stacking_test_predictions.csv"
+MODEL_PATH = MODELS_DIR / "stacked_random_forest.pkl"
+METADATA_PATH = MODELS_DIR / "stacked_random_forest_metadata.json"
+MATCHES_PATH = PROCESSED_DIR / "matches_clean.csv"
 
 STACKING_COLUMNS = [
     "poisson_expected_goals_home",
@@ -47,7 +37,6 @@ STACKING_COLUMNS = [
     "dixon_coles_expected_goals_home",
     "dixon_coles_expected_goals_away",
 ]
-BOOTSTRAP_SAMPLES = 5000
 
 
 def expected_goals_for_matches(

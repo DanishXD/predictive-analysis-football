@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import joblib
 import numpy as np
@@ -16,19 +15,24 @@ from sklearn.metrics import accuracy_score, f1_score, log_loss
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from config import N_SPLITS, RANDOM_STATE, TEST_SEASON
 from xgboost import XGBClassifier
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-FEATURES_PATH = PROJECT_ROOT / "data" / "processed" / "features.csv"
-ELO_PATH = PROJECT_ROOT / "data" / "processed" / "elo_history.csv"
-METRICS_PATH = PROJECT_ROOT / "data" / "processed" / "ml_model_metrics.csv"
-PREDICTIONS_PATH = PROJECT_ROOT / "data" / "processed" / "ml_test_predictions.csv"
-MODELS_DIR = PROJECT_ROOT / "models"
+from config import (
+    MODELS_DIR,
+    N_SPLITS,
+    PROCESSED_DIR,
+    RANDOM_STATE,
+    TARGET_MAPPING,
+    TARGET_NAMES,
+    TEST_SEASON,
+)
+
+FEATURES_PATH = PROCESSED_DIR / "features.csv"
+ELO_PATH = PROCESSED_DIR / "elo_history.csv"
+METRICS_PATH = PROCESSED_DIR / "ml_model_metrics.csv"
+PREDICTIONS_PATH = PROCESSED_DIR / "ml_test_predictions.csv"
 MODEL_PATH = MODELS_DIR / "best_ml_model.pkl"
 METADATA_PATH = MODELS_DIR / "best_ml_model_metadata.json"
-TARGET_MAPPING = {"H": 0, "D": 1, "A": 2}
-TARGET_NAMES = {value: key for key, value in TARGET_MAPPING.items()}
 
 NON_FEATURE_COLUMNS = {
     "match_id",

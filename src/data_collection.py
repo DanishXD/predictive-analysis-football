@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import re
-from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -15,25 +14,7 @@ try:
 except ImportError:
     pb = None
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RAW_DIR = PROJECT_ROOT / "data" / "raw"
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
-
-COMPETITION = "ENG Premier League"
-SEASONS = (
-    "2016-2017",
-    "2017-2018",
-    "2018-2019",
-    "2019-2020",
-    "2020-2021",
-    "2021-2022",
-    "2022-2023",
-    "2023-2024",
-    "2024-2025",
-    "2025-2026",
-)
-
+from config import COMPETITION, PROCESSED_DIR, RAW_DIR, SEASONS
 from team_mapping import TEAM_NAME_MAPPING
 
 COLUMN_ALIASES = {

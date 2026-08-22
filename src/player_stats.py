@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 import pandas as pd
 
+from config import PROCESSED_DIR
 from team_mapping import TEAM_NAME_MAPPING
 
 try:
@@ -19,9 +19,7 @@ SOCCERDATA_HINT = (
     "Pasang opsional dengan: pip install soccerdata"
 )
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MATCHES_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
+MATCHES_PATH = PROCESSED_DIR / "matches_clean.csv"
 
 # FBref team names -> canonical EPL names (derived from single source of truth)
 # FBref format is similar to football-data.co.uk short names, so we reuse the mapping

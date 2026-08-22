@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
 import penaltyblog as pb
 
+from config import (
+    CORNER_OVER_UNDER_DEFAULT,
+    FBREF_SEASON,
+    MODELS_DIR,
+    PROCESSED_DIR,
+    PROJECT_ROOT,
+    YELLOW_OVER_UNDER_DEFAULT,
+)
 from corner_model import predict_corner_fixture, expected_corners, over_under_probability as corner_over_under
 from discipline_model import (
     predict_discipline_fixture as predict_yellow_fixture,
@@ -23,17 +30,16 @@ from statistical_models import btts_probability, predict_fixture
 from value_betting import build_ml_feature_rows
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MATCHES_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
-EVALUATION_PATH = PROJECT_ROOT / "data" / "processed" / "evaluation_summary.csv"
-ELO_RATINGS_PATH = PROJECT_ROOT / "data" / "processed" / "elo_current_ratings.csv"
-ML_MODEL_PATH = PROJECT_ROOT / "models" / "best_ml_model.pkl"
-ML_METADATA_PATH = PROJECT_ROOT / "models" / "best_ml_model_metadata.json"
-CORNER_MODEL_PATH = PROJECT_ROOT / "models" / "corner_poisson_model.pkl"
+MATCHES_PATH = PROCESSED_DIR / "matches_clean.csv"
+EVALUATION_PATH = PROCESSED_DIR / "evaluation_summary.csv"
+ELO_RATINGS_PATH = PROCESSED_DIR / "elo_current_ratings.csv"
+ML_MODEL_PATH = MODELS_DIR / "best_ml_model.pkl"
+ML_METADATA_PATH = MODELS_DIR / "best_ml_model_metadata.json"
+CORNER_MODEL_PATH = MODELS_DIR / "corner_poisson_model.pkl"
 
 GOAL_MODEL_PATHS = {
-    "poisson": PROJECT_ROOT / "models" / "poisson_goal_model.pkl",
-    "dixon_coles": PROJECT_ROOT / "models" / "dixon_coles_goal_model.pkl",
+    "poisson": MODELS_DIR / "poisson_goal_model.pkl",
+    "dixon_coles": MODELS_DIR / "dixon_coles_goal_model.pkl",
 }
 GOAL_MODEL_CLASSES = {
     "poisson": pb.models.PoissonGoalsModel,
@@ -50,7 +56,6 @@ CLASSIFICATION_MODEL_NAMES = {
 }
 GOAL_MODEL_CANDIDATES = set(GOAL_MODEL_PATHS)
 CLASSIFICATION_MODEL_CANDIDATES = set(CLASSIFICATION_MODEL_NAMES)
-FBREF_SEASON = "2526"
 
 
 def select_best_model(
@@ -510,10 +515,10 @@ def main() -> None:
         }
 
     # Yellow card predictions
-    YELLOW_THRESHOLD = 4.5
+    yellow_threshold = YELLOW_OVER_UNDER_DEFAULT
     try:
         yellow_model = pb.models.PoissonGoalsModel.load(
-            str(PROJECT_ROOT / "models" / "yellow_card_model.pkl")
+            str(MODELS_DIR / "yellow_card_model.pkl")
         )
         yellow_grid, yellow_cold_start = predict_yellow_fixture(
             yellow_model, home_team, away_team
@@ -533,7 +538,7 @@ def main() -> None:
         print(f"Peringatan: prediksi corner dilewati ({exc})")
         corner_grid = None
         corner_cold_start = False
-    corner_threshold = 9.5
+    corner_threshold = CORNER_OVER_UNDER_DEFAULT
 
     # Warnings
     warnings = team_warnings(home_team, team_stats, latest_season)
@@ -555,7 +560,7 @@ def main() -> None:
         corner_threshold,
         yellow_grid,
         yellow_cold_start,
-        YELLOW_THRESHOLD,
+        yellow_threshold,
         warnings,
         goal_cold_start,
     )

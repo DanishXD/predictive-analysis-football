@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import penaltyblog as pb
@@ -13,6 +11,8 @@ from config import (
     ELO_HOME_ADVANTAGE,
     ELO_K,
     MAX_GOALS,
+    MODELS_DIR,
+    PROCESSED_DIR,
     TEST_SEASON,
     TIME_DECAY_XI,
 )
@@ -22,10 +22,7 @@ try:
 except ImportError:
     sd = None
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
-MODELS_DIR = PROJECT_ROOT / "models"
+INPUT_PATH = PROCESSED_DIR / "matches_clean.csv"
 
 
 def fit_goal_models(train: pd.DataFrame):

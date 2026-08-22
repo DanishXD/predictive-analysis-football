@@ -4,25 +4,30 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
 import penaltyblog as pb
 
-from data_collection import TEAM_NAME_MAPPING
+from config import (
+    COMPETITION,
+    ELO_DEFAULT_RATING,
+    MODELS_DIR,
+    PROCESSED_DIR,
+    PROJECT_ROOT,
+)
 from feature_engineering import generate_features
 from statistical_models import predict_fixture
+from team_mapping import TEAM_NAME_MAPPING
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MATCHES_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
-ELO_RATINGS_PATH = PROJECT_ROOT / "data" / "processed" / "elo_current_ratings.csv"
-ML_MODEL_PATH = PROJECT_ROOT / "models" / "best_ml_model.pkl"
-ML_METADATA_PATH = PROJECT_ROOT / "models" / "best_ml_model_metadata.json"
-POISSON_MODEL_PATH = PROJECT_ROOT / "models" / "poisson_goal_model.pkl"
-DIXON_COLES_MODEL_PATH = PROJECT_ROOT / "models" / "dixon_coles_goal_model.pkl"
+MATCHES_PATH = PROCESSED_DIR / "matches_clean.csv"
+ELO_RATINGS_PATH = PROCESSED_DIR / "elo_current_ratings.csv"
+ML_MODEL_PATH = MODELS_DIR / "best_ml_model.pkl"
+ML_METADATA_PATH = MODELS_DIR / "best_ml_model_metadata.json"
+POISSON_MODEL_PATH = MODELS_DIR / "poisson_goal_model.pkl"
+DIXON_COLES_MODEL_PATH = MODELS_DIR / "dixon_coles_goal_model.pkl"
 DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "upcoming_fixtures_example.csv"
 DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "data" / "processed" / "value_betting_output.csv"
 
@@ -123,7 +128,7 @@ def build_ml_feature_rows(
             [
                 {
                     "match_id": fixture.fixture_id,
-                    "competition": "ENG Premier League",
+                    "competition": COMPETITION,
                     "season": fixture.season,
                     "datetime": fixture.datetime,
                     "date": fixture.datetime.normalize(),
@@ -157,8 +162,8 @@ def build_ml_feature_rows(
         )
         generated = generate_features(combined)
         feature_row = generated.loc[generated["match_id"] == fixture.fixture_id].iloc[0]
-        home_elo = float(elo_ratings.get(fixture.team_home, 1500.0))
-        away_elo = float(elo_ratings.get(fixture.team_away, 1500.0))
+        home_elo = float(elo_ratings.get(fixture.team_home, ELO_DEFAULT_RATING))
+        away_elo = float(elo_ratings.get(fixture.team_away, ELO_DEFAULT_RATING))
 
         row = {"fixture_id": fixture.fixture_id}
         for column in feature_columns:

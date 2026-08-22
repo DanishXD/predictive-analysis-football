@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from pathlib import Path
 
 import pandas as pd
 
-from config import ROLLING_WINDOW
+from config import PROCESSED_DIR, ROLLING_WINDOW
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
-OUTPUT_PATH = PROJECT_ROOT / "data" / "processed" / "features.csv"
+INPUT_PATH = PROCESSED_DIR / "matches_clean.csv"
+OUTPUT_PATH = PROCESSED_DIR / "features.csv"
 
 IDENTIFIER_COLUMNS = [
     "match_id",

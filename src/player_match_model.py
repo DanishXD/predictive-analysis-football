@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
+from config import FBREF_SEASON, PROCESSED_DIR
 from player_stats import (
     SOCCERDATA_HINT,
     fetch_player_stats,
@@ -21,9 +20,7 @@ except ImportError:
     sd = None
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MATCHES_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
-FBREF_SEASON = "2526"
+MATCHES_PATH = PROCESSED_DIR / "matches_clean.csv"
 RECENT_MATCHES = 5
 
 SOT_DISCLAIMER = (

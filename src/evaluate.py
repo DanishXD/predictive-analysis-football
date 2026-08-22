@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import penaltyblog as pb
 import seaborn as sns
-from config import TEST_SEASON
+from config import MODELS_DIR, PROCESSED_DIR, PROJECT_ROOT, TARGET_MAPPING, TEST_SEASON
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import (
     accuracy_score,
@@ -18,11 +16,7 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 FIGURES_DIR = PROJECT_ROOT / "notebooks" / "figures"
-MODELS_DIR = PROJECT_ROOT / "models"
 
 MATCHES_PATH = PROCESSED_DIR / "matches_clean.csv"
 STATISTICAL_PATH = PROCESSED_DIR / "test_match_probabilities.csv"
@@ -38,7 +32,6 @@ BOOKMAKER_PATH = PROCESSED_DIR / "bookmaker_probabilities.csv"
 
 CLASS_CODES = ["H", "D", "A"]
 CLASS_NAMES = ["Home Win", "Draw", "Away Win"]
-TARGET_MAPPING = {"H": 0, "D": 1, "A": 2}
 MODEL_ORDER = [
     "poisson",
     "dixon_coles",
