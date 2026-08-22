@@ -1,4 +1,4 @@
-"""Collect and clean EPL match data for the 2021/22 to 2025/26 seasons."""
+"""Collect and clean EPL match data for the 2016/17 to 2025/26 seasons."""
 
 from __future__ import annotations
 
@@ -22,6 +22,11 @@ PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 
 COMPETITION = "ENG Premier League"
 SEASONS = (
+    "2016-2017",
+    "2017-2018",
+    "2018-2019",
+    "2019-2020",
+    "2020-2021",
     "2021-2022",
     "2022-2023",
     "2023-2024",

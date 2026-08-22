@@ -8,16 +8,17 @@ import numpy as np
 import pandas as pd
 import penaltyblog as pb
 
+from config import CORNER_OVER_UNDER_DEFAULT, TEST_SEASON, TIME_DECAY_XI
+
+# Imported for documentation — data already uses canonical names from matches_clean.csv
+from team_mapping import TEAM_NAME_MAPPING
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 MODELS_DIR = PROJECT_ROOT / "models"
 CORNER_MODEL_PATH = MODELS_DIR / "corner_poisson_model.pkl"
-
-CORNER_OVER_UNDER_DEFAULT = 9.5
-TIME_DECAY_XI = 0.0018
-TEST_SEASON = "2025-2026"
 
 
 def fit_corner_model(train: pd.DataFrame):
@@ -117,6 +118,21 @@ def main() -> None:
     print(f"Fit corner Poisson pada {len(train)} pertandingan...")
     model = fit_corner_model(train)
     model.save(str(CORNER_MODEL_PATH))
+
+    # Save training metadata
+    import json
+    metadata = {
+        "training_matches": len(train),
+        "training_seasons": sorted(train["season"].unique().tolist()),
+        "training_period_start": train["season"].min(),
+        "training_period_end": train["season"].max(),
+        "test_season": TEST_SEASON,
+        "timestamp": pd.Timestamp.now().isoformat(),
+        "model": "corner_poisson",
+    }
+    (CORNER_MODEL_PATH.parent / "corner_model_metadata.json").write_text(
+        json.dumps(metadata, indent=2), encoding="utf-8"
+    )
 
     rows = []
     for match in test.sort_values(["datetime", "match_id"]).itertuples(index=False):

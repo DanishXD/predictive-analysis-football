@@ -7,3 +7,11 @@ jupyter>=1.1,<2.0
 matplotlib>=3.9,<4.0
 seaborn>=0.13,<1.0
 joblib>=1.4,<2.0
+
+# Opsional — hanya untuk fitur data pemain (Fase 10 & 13).
+# Tidak dipasang default karena membawa Selenium & FBref sering memblokir
+# automated access. Tanpa ini, script pemain menampilkan pesan fallback.
+# pip install soccerdata
+
+# Dev dependency — jalankan tes dengan: python -m pytest tests/
+pytest>=8.0

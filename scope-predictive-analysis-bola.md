@@ -5,12 +5,12 @@ Bikin model machine learning & statistik yang bisa memprediksi hasil pertandinga
 
 ## 2. Keputusan Konkret (Default — ganti kalau mau beda)
 - **Liga:** English Premier League (EPL) — data paling lengkap & bersih
-- **Rentang data:** 5 musim terakhir — 2021/22 s.d. 2025/26 (~1.900 pertandingan)
-  > *Naik dari 3 ke 5 musim: 3 musim (~1.140 match) terlalu kecil buat model ML kompleks kayak XGBoost dengan banyak fitur — risiko overfitting.*
+- **Rentang data:** 10 musim terakhir — 2016/17 s.d. 2025/26 (musim 2025/26 tetap jadi test period)
+  > *Naik dari 5 ke 10 musim: 5 musim (~1.900 match) masih tergolong kecil buat model ML kompleks. Catatan: musim 2016/17-2018/19 itu sebelum VAR diperkenalkan di EPL (VAR masuk musim 2019/20), jadi training data mencampur 2 era yang karakteristiknya bisa beda (misal jumlah penalti/kartu). Belum ditangani dengan fitur khusus — dicatat sebagai limitation.*
 - **Target prediksi (Fase utama):** Full-Time Result — 3 kelas (Home Win / Draw / Away Win)
 - **Target lanjutan (opsional):** Over/Under 2.5 Goals, Both Teams to Score (BTTS)
 
-> **Penting soal season:** data 2021/22–2025/26 di atas itu buat **TRAINING** (ngajarin model pola historis) — **BUKAN** musim yang mau diprediksi. Model yang udah jadi dipakai buat prediksi pertandingan ke depan (termasuk musim 2026/27) lewat `predict_match.py` (Fase 9), asalkan fitur tim (form, Elo rating) di-update pakai data paling baru yang tersedia. Catatan: jendela transfer musim panas 2026 (sebelum musim 2026/27 mulai) bisa bikin rating/form dari data 2025/26 udah agak basi begitu musim baru mulai, terutama buat tim yang belanja pemain besar-besaran — perlu update data begitu pertandingan 2026/27 mulai jalan.
+> **Penting soal season:** data 2016/17–2024/25 di atas itu buat **TRAINING** (ngajarin model pola historis), dan 2025/26 jadi test period — **BUKAN** musim yang mau diprediksi. Model yang udah jadi dipakai buat prediksi pertandingan ke depan (termasuk musim 2026/27) lewat `predict_match.py` (Fase 9), asalkan fitur tim (form, Elo rating) di-update pakai data paling baru yang tersedia. Catatan: jendela transfer musim panas 2026 (sebelum musim 2026/27 mulai) bisa bikin rating/form dari data 2025/26 udah agak basi begitu musim baru mulai, terutama buat tim yang belanja pemain besar-besaran — perlu update data begitu pertandingan 2026/27 mulai jalan.
 
 ## 3. Model yang Dipakai — 2 Track
 
@@ -117,7 +117,7 @@ football-predictive-analysis/
 - **Benchmark utama:** RPS & log loss model dibandingkan ke odds bandar yang udah di-decode
 
 ## 11. Catatan Ukuran Data
-5 musim (~1.900 match) masih tergolong dataset kecil buat ML kompleks kayak XGBoost dengan banyak fitur. Mitigasi: jaga jumlah fitur tetap moderate, pakai regularization / batasi kedalaman model, dan selalu evaluasi di test set (bukan cuma train set).
+10 musim (~3.800 match) masih tergolong dataset kecil buat ML kompleks kayak XGBoost dengan banyak fitur. Mitigasi: jaga jumlah fitur tetap moderate, pakai regularization / batasi kedalaman model, dan selalu evaluasi di test set (bukan cuma train set).
 
 ## 12. Value Betting — Testing Riil (Opsional, setelah Fase 7)
 Kalau mau nyoba bandingin model vs pasar buat testing (bukan bet beneran), alurnya:
@@ -128,7 +128,7 @@ Kalau mau nyoba bandingin model vs pasar buat testing (bukan bet beneran), alurn
 
 **Sebelum dipakai buat testing beneran, wajib inget:**
 - Valid cuma kalau model udah dikalibrasi dengan baik (cek ulang calibration check di Fase 7)
-- Dataset ~1.900 match masih kecil — "value" yang keliatan gede bisa jadi overfitting/noise, bukan edge beneran
+- Dataset ~3.800 match masih kecil — "value" yang keliatan gede bisa jadi overfitting/noise, bukan edge beneran
 - Bandar udah sangat efisien — kalaupun ada edge, biasanya tipis dan cepet ilang
 - Ini exercise data science buat belajar, bukan strategi yang dijamin cuan
 

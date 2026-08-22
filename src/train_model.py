@@ -16,8 +16,8 @@ from sklearn.metrics import accuracy_score, f1_score, log_loss
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from config import N_SPLITS, RANDOM_STATE, TEST_SEASON
 from xgboost import XGBClassifier
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FEATURES_PATH = PROJECT_ROOT / "data" / "processed" / "features.csv"
@@ -27,10 +27,6 @@ PREDICTIONS_PATH = PROJECT_ROOT / "data" / "processed" / "ml_test_predictions.cs
 MODELS_DIR = PROJECT_ROOT / "models"
 MODEL_PATH = MODELS_DIR / "best_ml_model.pkl"
 METADATA_PATH = MODELS_DIR / "best_ml_model_metadata.json"
-
-TEST_SEASON = "2025-2026"
-N_SPLITS = 5
-RANDOM_STATE = 42
 TARGET_MAPPING = {"H": 0, "D": 1, "A": 2}
 TARGET_NAMES = {value: key for key, value in TARGET_MAPPING.items()}
 
@@ -344,6 +340,11 @@ def main() -> None:
         "test_season": TEST_SEASON,
         "train_rows": len(train),
         "test_rows": len(test),
+        "training_matches": len(train),
+        "training_seasons": sorted(train["season"].unique().tolist()),
+        "training_period_start": train["season"].min(),
+        "training_period_end": train["season"].max(),
+        "timestamp": pd.Timestamp.now().isoformat(),
         "feature_columns": feature_columns,
         "target_mapping": TARGET_MAPPING,
     }

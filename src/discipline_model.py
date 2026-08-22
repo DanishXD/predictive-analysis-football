@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import penaltyblog as pb
 
+from config import TEST_SEASON, TIME_DECAY_XI, YELLOW_OVER_UNDER_DEFAULT
 from team_mapping import TEAM_NAME_MAPPING
 
 
@@ -17,10 +18,6 @@ PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 MODELS_DIR = PROJECT_ROOT / "models"
 YELLOW_MODEL_PATH = MODELS_DIR / "yellow_card_model.pkl"
 RED_MODEL_PATH = MODELS_DIR / "red_card_model.pkl"
-
-YELLOW_OVER_UNDER_DEFAULT = 4.5
-TIME_DECAY_XI = 0.0018
-TEST_SEASON = "2025-2026"
 
 
 def fit_discipline_model(
@@ -140,6 +137,21 @@ def main() -> None:
     train = matches.loc[matches["season"] != TEST_SEASON].copy()
     test = matches.loc[matches["season"] == TEST_SEASON].copy()
     all_teams = sorted(set(matches["team_home"]) | set(matches["team_away"]))
+
+    # Save training metadata
+    import json
+    metadata = {
+        "training_matches": len(train),
+        "training_seasons": sorted(train["season"].unique().tolist()),
+        "training_period_start": train["season"].min(),
+        "training_period_end": train["season"].max(),
+        "test_season": TEST_SEASON,
+        "timestamp": pd.Timestamp.now().isoformat(),
+        "models": ["yellow_card", "red_card"],
+    }
+    (YELLOW_MODEL_PATH.parent / "discipline_model_metadata.json").write_text(
+        json.dumps(metadata, indent=2), encoding="utf-8"
+    )
 
     # --- Yellow cards ---
     print(f"Fit yellow card Poisson pada {len(train)} pertandingan...")

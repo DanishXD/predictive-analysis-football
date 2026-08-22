@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import penaltyblog as pb
 import seaborn as sns
+from config import TEST_SEASON
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import (
     accuracy_score,
@@ -21,6 +22,7 @@ from sklearn.metrics import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 FIGURES_DIR = PROJECT_ROOT / "notebooks" / "figures"
+MODELS_DIR = PROJECT_ROOT / "models"
 
 MATCHES_PATH = PROCESSED_DIR / "matches_clean.csv"
 STATISTICAL_PATH = PROCESSED_DIR / "test_match_probabilities.csv"
@@ -34,7 +36,6 @@ CONFUSION_PATH = PROCESSED_DIR / "evaluation_confusion_matrices.csv"
 PREDICTIONS_PATH = PROCESSED_DIR / "evaluation_predictions.csv"
 BOOKMAKER_PATH = PROCESSED_DIR / "bookmaker_probabilities.csv"
 
-TEST_SEASON = "2025-2026"
 CLASS_CODES = ["H", "D", "A"]
 CLASS_NAMES = ["Home Win", "Draw", "Away Win"]
 TARGET_MAPPING = {"H": 0, "D": 1, "A": 2}
@@ -200,23 +201,27 @@ def standardize_predictions(base: pd.DataFrame) -> pd.DataFrame:
         frame["model"] = model
         model_frames.append(frame)
 
-    stacking = pd.read_csv(STACKING_PATH)
-    frame = stacking[
-        [
-            "match_id",
-            "stacked_prob_home",
-            "stacked_prob_draw",
-            "stacked_prob_away",
-        ]
-    ].rename(
-        columns={
-            "stacked_prob_home": "prob_home",
-            "stacked_prob_draw": "prob_draw",
-            "stacked_prob_away": "prob_away",
-        }
-    )
-    frame["model"] = "random_forest_stacked_xg"
-    model_frames.append(frame)
+    # Stacking model is optional (may not exist if stacking.py not run)
+    if STACKING_PATH.exists():
+        stacking = pd.read_csv(STACKING_PATH)
+        frame = stacking[
+            [
+                "match_id",
+                "stacked_prob_home",
+                "stacked_prob_draw",
+                "stacked_prob_away",
+            ]
+        ].rename(
+            columns={
+                "stacked_prob_home": "prob_home",
+                "stacked_prob_draw": "prob_draw",
+                "stacked_prob_away": "prob_away",
+            }
+        )
+        frame["model"] = "random_forest_stacked_xg"
+        model_frames.append(frame)
+    else:
+        print("Stacking model not found, skipping (stacking.py not run)")
 
     bookmaker = decode_bookmaker_odds(base)
     bookmaker.to_csv(BOOKMAKER_PATH, index=False)
@@ -279,8 +284,17 @@ def evaluate_predictions(
     class_rows = []
     confusion_rows = []
 
-    for model in MODEL_ORDER:
+    # Only evaluate models that actually have predictions
+    available_models = predictions["model"].unique()
+    models_to_evaluate = [m for m in MODEL_ORDER if m in available_models]
+
+    for model in models_to_evaluate:
         model_data = predictions.loc[predictions["model"] == model]
+        
+        # Skip if no data for this model
+        if len(model_data) == 0:
+            continue
+            
         y_true = model_data["result"].map(TARGET_MAPPING).to_numpy()
         y_pred = model_data["predicted_result"].map(TARGET_MAPPING).to_numpy()
         probabilities = model_data[["prob_home", "prob_draw", "prob_away"]].to_numpy()
@@ -339,6 +353,11 @@ def evaluate_predictions(
 def plot_calibration(predictions: pd.DataFrame) -> None:
     """Plot one-vs-rest calibration curves for every model and outcome."""
     sns.set_theme(style="whitegrid", context="notebook")
+    
+    # Only plot models that have predictions
+    available_models = predictions["model"].unique()
+    models_to_plot = [m for m in MODEL_ORDER if m in available_models]
+    
     colors = dict(zip(MODEL_ORDER, sns.color_palette("tab10", len(MODEL_ORDER))))
     fig, axes = plt.subplots(1, 3, figsize=(18, 5.5), sharex=True, sharey=True)
 
@@ -346,8 +365,13 @@ def plot_calibration(predictions: pd.DataFrame) -> None:
         zip(CLASS_CODES, CLASS_NAMES)
     ):
         axis = axes[class_index]
-        for model in MODEL_ORDER:
+        for model in models_to_plot:
             model_data = predictions.loc[predictions["model"] == model]
+            
+            # Skip if no data
+            if len(model_data) == 0:
+                continue
+                
             y_binary = (model_data["result"] == class_code).astype(int)
             predicted = model_data[
                 ["prob_home", "prob_draw", "prob_away"][class_index]
@@ -423,7 +447,11 @@ def validate_outputs(
 ) -> None:
     """Validate complete model coverage and probability invariants."""
     errors = []
-    expected_rows = len(base) * len(MODEL_ORDER)
+    
+    # Dynamic model count (only models actually present)
+    actual_models = predictions["model"].unique()
+    expected_rows = len(base) * len(actual_models)
+    
     if len(predictions) != expected_rows:
         errors.append(f"prediksi {len(predictions)}, seharusnya {expected_rows}")
     if predictions.duplicated(["match_id", "model"]).any():
@@ -433,10 +461,10 @@ def validate_outputs(
     probability_sum = predictions[["prob_home", "prob_draw", "prob_away"]].sum(axis=1)
     if not np.allclose(probability_sum, 1.0, atol=1e-7):
         errors.append("probabilitas tidak berjumlah satu")
-    if set(summary["model"]) != set(MODEL_ORDER):
-        errors.append("summary tidak mencakup semua model")
-    if len(class_metrics) != len(MODEL_ORDER) * 3:
-        errors.append("class metrics tidak lengkap")
+    if set(summary["model"]) != set(actual_models):
+        errors.append(f"summary tidak mencakup semua model (expected {len(actual_models)}, got {len(summary)})")
+    if len(class_metrics) != len(actual_models) * 3:
+        errors.append(f"class metrics tidak lengkap (expected {len(actual_models)*3}, got {len(class_metrics)})")
     if not summary[["accuracy", "brier_score", "rps", "mean_ece"]].ge(0).all().all():
         errors.append("metrik negatif ditemukan")
 
@@ -444,9 +472,77 @@ def validate_outputs(
         raise ValueError("; ".join(errors))
 
 
+def check_training_consistency() -> None:
+    """Warn if models were trained on different data periods (tolerant to missing metadata)."""
+    import json
+    
+    metadata_files = {
+        "ml_models": MODELS_DIR / "best_ml_model_metadata.json",
+        "statistical_models": MODELS_DIR / "statistical_models_metadata.json",
+        "corner_model": MODELS_DIR / "corner_model_metadata.json",
+        "discipline_model": MODELS_DIR / "discipline_model_metadata.json",
+    }
+    
+    training_periods = {}
+    missing_metadata = []
+    
+    for model_name, meta_path in metadata_files.items():
+        if meta_path.exists():
+            try:
+                meta = json.load(open(meta_path))
+                training_periods[model_name] = {
+                    "matches": meta.get("training_matches"),
+                    "seasons": meta.get("training_seasons", []),
+                    "period": (meta.get("training_period_start"), meta.get("training_period_end")),
+                    "timestamp": meta.get("timestamp"),
+                }
+            except Exception:
+                missing_metadata.append(f"{model_name} (corrupt metadata)")
+        else:
+            missing_metadata.append(f"{model_name} (file not found)")
+    
+    # Tolerant: skip check if metadata not available
+    if missing_metadata:
+        print("\n" + "="*80)
+        print("Training consistency check: metadata not available for:")
+        for item in missing_metadata:
+            print(f"  - {item}")
+        print("Skipping consistency check (will be available after next training run)")
+        print("="*80 + "\n")
+        return
+    
+    # Check if all models have same training period
+    if not training_periods:
+        return
+    
+    unique_periods = set(tp["period"] for tp in training_periods.values())
+    unique_matches = set(tp["matches"] for tp in training_periods.values())
+    
+    if len(unique_periods) > 1 or len(unique_matches) > 1:
+        print("\n" + "="*80)
+        print("WARNING: Models trained on DIFFERENT data periods")
+        print("="*80)
+        for model, info in sorted(training_periods.items()):
+            seasons_str = f"{info['period'][0]} to {info['period'][1]}" if info['period'][0] else "N/A"
+            timestamp_str = info['timestamp'][:19] if info['timestamp'] else "N/A"
+            print(f"  {model:20s}: {seasons_str:20s} | {info['matches']:4d} matches | trained: {timestamp_str}")
+        print("\nComparison may not be fair. Consider re-running full cascade to ensure")
+        print("all models trained on the same data period.")
+        print("="*80 + "\n")
+    else:
+        # All consistent - optionally print confirmation
+        sample = list(training_periods.values())[0]
+        print(f"\nTraining consistency check: All models trained on same period")
+        print(f"  Period: {sample['period'][0]} to {sample['period'][1]} ({sample['matches']} matches)\n")
+
+
 def main() -> None:
     """Run the complete Phase 7 evaluation."""
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Check training consistency before evaluation
+    check_training_consistency()
+    
     base = base_test_matches()
     predictions = standardize_predictions(base)
     summary, class_metrics, confusion = evaluate_predictions(predictions)

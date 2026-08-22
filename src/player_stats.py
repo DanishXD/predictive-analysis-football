@@ -6,31 +6,32 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
-import soccerdata as sd
+
+from team_mapping import TEAM_NAME_MAPPING
+
+try:
+    import soccerdata as sd
+except ImportError:
+    sd = None
+
+SOCCERDATA_HINT = (
+    "soccerdata tidak terpasang. Fitur data pemain dinonaktifkan. "
+    "Pasang opsional dengan: pip install soccerdata"
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MATCHES_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
 
-# FBref team names often differ from football-data.co.uk canonical names
-FBREF_TO_CANONICAL = {
-    "Manchester Utd": "Manchester United",
-    "Nott'ham Forest": "Nottingham Forest",
-    "Sheffield Utd": "Sheffield United",
-    "West Brom": "West Bromwich Albion",
-    "Wolves": "Wolverhampton Wanderers",
-    "Brighton": "Brighton & Hove Albion",
-    "Leicester": "Leicester City",
-    "Leeds": "Leeds United",
-    "Ipswich": "Ipswich Town",
-    "Luton": "Luton Town",
-    "Norwich": "Norwich City",
-    "Newcastle": "Newcastle United",
-    "Tottenham": "Tottenham Hotspur",
-    "West Ham": "West Ham United",
-    "Man City": "Manchester City",
-    "Man United": "Manchester United",
-}
+# FBref team names -> canonical EPL names (derived from single source of truth)
+# FBref format is similar to football-data.co.uk short names, so we reuse the mapping
+FBREF_TO_CANONICAL = TEAM_NAME_MAPPING.copy()
+
+# FBref has some additional variations not in football-data.co.uk
+FBREF_TO_CANONICAL.update({
+    "Manchester Utd": "Manchester United",  # FBref uses "Utd" instead of "United"
+    "Nott'ham Forest": "Nottingham Forest",  # FBref apostrophe variation
+})
 
 DISCLAIMER = (
     "Data pemain ini hanya konteks tambahan. TIDAK dipakai sebagai fitur di model "
@@ -40,6 +41,8 @@ DISCLAIMER = (
 
 def fetch_player_stats(season: str) -> pd.DataFrame:
     """Fetch and merge standard and shooting stats from FBref with caching."""
+    if sd is None:
+        raise RuntimeError(SOCCERDATA_HINT)
     print(f"Mengambil data pemain FBref musim {season}...")
     fbref = sd.FBref(leagues="ENG-Premier League", seasons=season)
     

@@ -6,9 +6,19 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import soccerdata as sd
 
-from player_stats import fetch_player_stats, get_key_players, FBREF_TO_CANONICAL, DISCLAIMER as PLAYER_DISCLAIMER
+from player_stats import (
+    SOCCERDATA_HINT,
+    fetch_player_stats,
+    get_key_players,
+    FBREF_TO_CANONICAL,
+    DISCLAIMER as PLAYER_DISCLAIMER,
+)
+
+try:
+    import soccerdata as sd
+except ImportError:
+    sd = None
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +60,8 @@ def _fbref_team_name(team: str) -> str:
 
 def _recent_team_matches(team: str) -> pd.DataFrame:
     """Fetch match-level player stats for recent games of a specific team."""
+    if sd is None:
+        raise RuntimeError(SOCCERDATA_HINT)
     fbref = sd.FBref(leagues="ENG-Premier League", seasons=FBREF_SEASON)
     schedule = fbref.read_schedule()
 

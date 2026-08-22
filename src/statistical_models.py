@@ -8,17 +8,24 @@ import numpy as np
 import pandas as pd
 import penaltyblog as pb
 
+from config import (
+    ELO_DEFAULT_RATING,
+    ELO_HOME_ADVANTAGE,
+    ELO_K,
+    MAX_GOALS,
+    TEST_SEASON,
+    TIME_DECAY_XI,
+)
+
+try:
+    import soccerdata as sd
+except ImportError:
+    sd = None
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 MODELS_DIR = PROJECT_ROOT / "models"
-
-TEST_SEASON = "2025-2026"
-TIME_DECAY_XI = 0.0018
-MAX_GOALS = 15
-ELO_K = 20.0
-ELO_HOME_ADVANTAGE = 100.0
 
 
 def fit_goal_models(train: pd.DataFrame):
@@ -179,56 +186,223 @@ def build_test_probabilities(
     return pd.DataFrame(rows)
 
 
+def get_clubelo_rating(team: str, as_of_date: pd.Timestamp) -> float | None:
+    """
+    Query ClubElo API for a team's rating as of a specific date.
+    
+    Returns None if ClubElo unavailable or team not found.
+    """
+    if sd is None:
+        return None
+    
+    try:
+        # ClubElo uses specific date format
+        date_str = as_of_date.strftime("%Y-%m-%d")
+        clubelo = sd.ClubElo()
+        
+        # ClubElo team name mapping (EPL canonical -> ClubElo format)
+        # Most names match, but some need mapping
+        team_mapping = {
+            "Brighton & Hove Albion": "Brighton",
+            "Manchester City": "Man City",
+            "Manchester United": "Man United",
+            "Newcastle United": "Newcastle",
+            "Nottingham Forest": "Nott'm Forest",
+            "Sheffield United": "Sheffield Utd",
+            "Tottenham Hotspur": "Tottenham",
+            "West Ham United": "West Ham",
+            "Wolverhampton Wanderers": "Wolves",
+        }
+        clubelo_name = team_mapping.get(team, team)
+        
+        # Get rating history up to the date
+        ratings = clubelo.read_by_date(date_str)
+        
+        # Filter for the team
+        team_rating = ratings[ratings.index.get_level_values('team') == clubelo_name]
+        
+        if not team_rating.empty:
+            # Get the most recent rating before or on the date
+            return float(team_rating['elo'].iloc[-1])
+        
+        return None
+        
+    except Exception:
+        # ClubElo API down, network error, or team not found
+        return None
+
+
+def get_bottom_three_average_elo(
+    elo_ratings: dict[str, float],
+    matches: pd.DataFrame,
+    current_season: str,
+) -> float:
+    """
+    Fallback: compute average Elo of bottom 3 teams from previous season's final table.
+    
+    If no prior season data, returns default rating.
+    """
+    # Find previous season
+    seasons = sorted(matches['season'].unique())
+    try:
+        prev_season_idx = seasons.index(current_season) - 1
+        if prev_season_idx < 0:
+            return ELO_DEFAULT_RATING
+        prev_season = seasons[prev_season_idx]
+    except (ValueError, IndexError):
+        return ELO_DEFAULT_RATING
+    
+    # Get final table of previous season (points, GD, GF)
+    prev_matches = matches[matches['season'] == prev_season].copy()
+    if prev_matches.empty:
+        return ELO_DEFAULT_RATING
+    
+    # Build final standings
+    standings = {}
+    for _, match in prev_matches.iterrows():
+        for team, goals_for, goals_against, is_home in [
+            (match['team_home'], match['goals_home'], match['goals_away'], True),
+            (match['team_away'], match['goals_away'], match['goals_home'], False),
+        ]:
+            if team not in standings:
+                standings[team] = {'points': 0, 'gf': 0, 'ga': 0}
+            
+            standings[team]['gf'] += goals_for
+            standings[team]['ga'] += goals_against
+            
+            if goals_for > goals_against:
+                standings[team]['points'] += 3
+            elif goals_for == goals_against:
+                standings[team]['points'] += 1
+    
+    # Sort by points, GD, GF
+    sorted_teams = sorted(
+        standings.items(),
+        key=lambda x: (x[1]['points'], x[1]['gf'] - x[1]['ga'], x[1]['gf']),
+        reverse=False  # ascending = bottom teams first
+    )
+    
+    # Get bottom 3 teams' current Elo (from elo_ratings dict)
+    bottom_three_elos = []
+    for team_name, _ in sorted_teams[:3]:
+        if team_name in elo_ratings:
+            bottom_three_elos.append(elo_ratings[team_name])
+    
+    if bottom_three_elos:
+        return float(np.mean(bottom_three_elos))
+    
+    return ELO_DEFAULT_RATING
+
+
+def identify_promoted_teams(matches: pd.DataFrame, season: str) -> set[str]:
+    """Identify teams appearing in season but not in previous season."""
+    seasons = sorted(matches['season'].unique())
+    try:
+        season_idx = seasons.index(season)
+        if season_idx == 0:
+            return set()
+        
+        prev_season = seasons[season_idx - 1]
+        prev_teams = set(matches[matches['season'] == prev_season]['team_home']) | \
+                      set(matches[matches['season'] == prev_season]['team_away'])
+        curr_teams = set(matches[matches['season'] == season]['team_home']) | \
+                      set(matches[matches['season'] == season]['team_away'])
+        
+        return curr_teams - prev_teams
+    
+    except (ValueError, IndexError):
+        return set()
+
+
 def build_elo_history(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Calculate pre- and post-match Elo ratings in chronological order."""
+    """Calculate pre- and post-match Elo ratings with ClubElo cold-start for promoted teams."""
     elo = pb.ratings.Elo(k=ELO_K, home_field_advantage=ELO_HOME_ADVANTAGE)
     history_rows = []
     result_codes = {"H": 0, "D": 1, "A": 2}
-
+    
+    # Track which teams got ClubElo vs fallback
+    cold_start_log = []
+    
     ordered = matches.sort_values(["datetime", "match_id"])
-    for match in ordered.itertuples(index=False):
-        home_pre = elo.get_team_rating(match.team_home)
-        away_pre = elo.get_team_rating(match.team_away)
-        elo.update_ratings(
-            match.team_home,
-            match.team_away,
-            result_codes[match.result],
-        )
-        home_post = elo.get_team_rating(match.team_home)
-        away_post = elo.get_team_rating(match.team_away)
+    
+    # Process season by season to handle promoted teams
+    for season in sorted(matches['season'].unique()):
+        season_matches = ordered[ordered['season'] == season]
+        promoted = identify_promoted_teams(matches, season)
+        
+        if promoted:
+            # Get first match date of the season for ClubElo query
+            first_match_date = season_matches['date'].min()
+            
+            for team in promoted:
+                # Try ClubElo first
+                clubelo_rating = get_clubelo_rating(team, first_match_date)
+                
+                if clubelo_rating is not None:
+                    elo.ratings[team] = clubelo_rating
+                    cold_start_log.append({
+                        'season': season,
+                        'team': team,
+                        'elo_rating': clubelo_rating,
+                        'source': 'ClubElo',
+                    })
+                else:
+                    # Fallback: average of bottom 3 from previous season
+                    fallback_rating = get_bottom_three_average_elo(
+                        elo.ratings, matches, season
+                    )
+                    elo.ratings[team] = fallback_rating
+                    cold_start_log.append({
+                        'season': season,
+                        'team': team,
+                        'elo_rating': fallback_rating,
+                        'source': 'bottom_3_average_fallback',
+                    })
+        
+        # Process matches for this season
+        for match in season_matches.itertuples(index=False):
+            home_pre = elo.get_team_rating(match.team_home)
+            away_pre = elo.get_team_rating(match.team_away)
+            elo.update_ratings(
+                match.team_home,
+                match.team_away,
+                result_codes[match.result],
+            )
+            home_post = elo.get_team_rating(match.team_home)
+            away_post = elo.get_team_rating(match.team_away)
 
-        history_rows.extend(
-            [
-                {
-                    "match_id": match.match_id,
-                    "datetime": match.datetime,
-                    "date": match.date,
-                    "season": match.season,
-                    "team": match.team_home,
-                    "opponent": match.team_away,
-                    "venue": "home",
-                    "result": match.result,
-                    "elo_pre": home_pre,
-                    "opponent_elo_pre": away_pre,
-                    "elo_gap_pre": home_pre - away_pre,
-                    "elo_post": home_post,
-                },
-                {
-                    "match_id": match.match_id,
-                    "datetime": match.datetime,
-                    "date": match.date,
-                    "season": match.season,
-                    "team": match.team_away,
-                    "opponent": match.team_home,
-                    "venue": "away",
-                    "result": match.result,
-                    "elo_pre": away_pre,
-                    "opponent_elo_pre": home_pre,
-                    "elo_gap_pre": away_pre - home_pre,
-                    "elo_post": away_post,
-                },
-            ]
-        )
+            history_rows.extend(
+                [
+                    {
+                        "match_id": match.match_id,
+                        "datetime": match.datetime,
+                        "date": match.date,
+                        "season": match.season,
+                        "team": match.team_home,
+                        "opponent": match.team_away,
+                        "venue": "home",
+                        "result": match.result,
+                        "elo_pre": home_pre,
+                        "opponent_elo_pre": away_pre,
+                        "elo_gap_pre": home_pre - away_pre,
+                        "elo_post": home_post,
+                    },
+                    {
+                        "match_id": match.match_id,
+                        "datetime": match.datetime,
+                        "date": match.date,
+                        "season": match.season,
+                        "team": match.team_away,
+                        "opponent": match.team_home,
+                        "venue": "away",
+                        "result": match.result,
+                        "elo_pre": away_pre,
+                        "opponent_elo_pre": home_pre,
+                        "elo_gap_pre": away_pre - home_pre,
+                        "elo_post": away_post,
+                    },
+                ]
+            )
 
     history = pd.DataFrame(history_rows)
     final_ratings = pd.DataFrame(
@@ -236,6 +410,13 @@ def build_elo_history(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame
     ).sort_values("elo_rating", ascending=False, ignore_index=True)
     final_ratings["elo_rank"] = np.arange(1, len(final_ratings) + 1)
     final_ratings["as_of"] = ordered["datetime"].max()
+    
+    # Log cold-start info
+    if cold_start_log:
+        print("\nElo cold-start untuk tim promosi:")
+        for entry in cold_start_log:
+            print(f"  {entry['season']} - {entry['team']}: {entry['elo_rating']:.1f} ({entry['source']})")
+    
     return history, final_ratings
 
 
@@ -348,6 +529,21 @@ def main() -> None:
     metrics.to_csv(PROCESSED_DIR / "statistical_model_metrics.csv", index=False)
     poisson.save(str(MODELS_DIR / "poisson_goal_model.pkl"))
     dixon_coles.save(str(MODELS_DIR / "dixon_coles_goal_model.pkl"))
+
+    # Save training metadata for consistency checking
+    import json
+    metadata = {
+        "training_matches": len(train),
+        "training_seasons": sorted(train["season"].unique().tolist()),
+        "training_period_start": train["season"].min(),
+        "training_period_end": train["season"].max(),
+        "test_season": TEST_SEASON,
+        "timestamp": pd.Timestamp.now().isoformat(),
+        "models": ["poisson", "dixon_coles", "elo"],
+    }
+    (MODELS_DIR / "statistical_models_metadata.json").write_text(
+        json.dumps(metadata, indent=2), encoding="utf-8"
+    )
 
     strongest_attack = strengths.loc[
         (strengths["model"] == "dixon_coles") & (strengths["attack_rank"] == 1),

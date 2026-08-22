@@ -86,7 +86,7 @@ python -m pip install -r requirements.txt
 
 ### Fase 1: Data Collection & Cleaning
 
-Pipeline mengambil data EPL musim 2021/22 sampai 2025/26 melalui scraper
+Pipeline mengambil data EPL musim 2016/17 sampai 2025/26 melalui scraper
 `penaltyblog`. Jika scraper gagal untuk suatu musim, pipeline otomatis mengunduh
 CSV dari football-data.co.uk.
 
@@ -189,7 +189,7 @@ Kolom wajib: `fixture_id`, `season`, `datetime`, `team_home`, `team_away`,
 
 **Disclaimer:** Fitur ini hanya exercise data science untuk mempelajari perbedaan
 probabilitas model dan pasar, **bukan alat rekomendasi taruhan**. Dataset hanya
-sekitar 1.900 pertandingan dan pada evaluasi Fase 7 odds pasar mengalahkan semua
+sekitar 3.800 pertandingan dan pada evaluasi Fase 7 odds pasar mengalahkan semua
 model pada RPS dan log loss. EV tinggi bisa berasal dari noise, data yang sudah
 stale, cold-start, atau model yang belum terkalibrasi dengan baik — bukan bukti
 adanya edge maupun jaminan profit. Jangan mempertaruhkan uang berdasarkan output
@@ -323,7 +323,7 @@ dengan benar. Prompt audit lengkap tersedia di
 
 ## Keterbatasan & Disclaimer
 
-- Dataset hanya ~1.900 pertandingan (5 musim EPL) — tergolong kecil untuk model
+- Dataset hanya ~3.800 pertandingan (10 musim EPL) — tergolong kecil untuk model
   ML kompleks, risiko overfitting.
 - Pada evaluasi Fase 7, odds bandar mengalahkan semua model pada metrik RPS dan
   log loss.

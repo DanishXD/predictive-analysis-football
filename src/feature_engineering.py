@@ -7,11 +7,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from config import ROLLING_WINDOW
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "matches_clean.csv"
 OUTPUT_PATH = PROJECT_ROOT / "data" / "processed" / "features.csv"
-ROLLING_WINDOW = 5
 
 IDENTIFIER_COLUMNS = [
     "match_id",
