@@ -213,15 +213,19 @@ def load_match_player_predictions(
         }
 
     def format_players(players_df):
-        return [
-            {
-                "player": row["player"],
-                "goals": int(row.get("goals", 0)),
-                "assists": int(row.get("assists", 0)),
-                "goal_contribution": int(row.get("goals", 0) + row.get("assists", 0)),
-            }
-            for _, row in players_df.iterrows()
-        ]
+        formatted = []
+        for _, row in players_df.iterrows():
+            goals = int(row["goals"]) if pd.notna(row.get("goals")) else 0
+            assists = int(row["assists"]) if pd.notna(row.get("assists")) else 0
+            formatted.append(
+                {
+                    "player": row["player"],
+                    "goals": goals,
+                    "assists": assists,
+                    "goal_contribution": goals + assists,
+                }
+            )
+        return formatted
 
     return {
         "home_players": format_players(home_raw),

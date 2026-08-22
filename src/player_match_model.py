@@ -197,13 +197,19 @@ def predict_motm_candidate(team_a: str, team_b: str) -> dict:
 
     def format_candidate(df: pd.DataFrame) -> list[dict]:
         candidates = []
+
+        def safe_int(value, default=0):
+            return int(value) if pd.notna(value) else default
+
         for _, row in df.iterrows():
+            goals = safe_int(row.get("goals", 0))
+            assists = safe_int(row.get("assists", 0))
             candidates.append({
                 "player": row.get("player", ""),
-                "goals": int(row.get("goals", 0)),
-                "assists": int(row.get("assists", 0)),
-                "goal_contribution": int(row.get("goals", 0) + row.get("assists", 0)),
-                "shots_on_target": int(row.get("shots_on_target", 0)),
+                "goals": goals,
+                "assists": assists,
+                "goal_contribution": goals + assists,
+                "shots_on_target": safe_int(row.get("shots_on_target", 0)),
                 "expected_goals": (
                     round(row.get("expected_goals", 0), 1)
                     if pd.notna(row.get("expected_goals"))

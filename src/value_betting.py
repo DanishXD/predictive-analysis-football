@@ -113,18 +113,58 @@ def load_fixtures(path: Path, historical_matches: pd.DataFrame) -> pd.DataFrame:
     return fixtures.sort_values(["datetime", "fixture_id"]).reset_index(drop=True)
 
 
+def _build_ml_feature_row(
+    fixture,
+    feature_row: pd.Series,
+    elo_ratings: dict[str, float],
+    feature_columns: list[str],
+) -> dict:
+    home_elo = float(elo_ratings.get(fixture.team_home, ELO_DEFAULT_RATING))
+    away_elo = float(elo_ratings.get(fixture.team_away, ELO_DEFAULT_RATING))
+
+    row = {"fixture_id": fixture.fixture_id}
+    for column in feature_columns:
+        if column == "home_elo_pre":
+            row[column] = home_elo
+        elif column == "away_elo_pre":
+            row[column] = away_elo
+        elif column == "elo_gap_pre":
+            row[column] = home_elo - away_elo
+        else:
+            row[column] = feature_row[column]
+    return row
+
+
 def build_ml_feature_rows(
     fixtures: pd.DataFrame,
     historical_matches: pd.DataFrame,
     elo_ratings: dict[str, float],
     feature_columns: list[str],
 ) -> pd.DataFrame:
-    """Reconstruct each future fixture's pre-match features independently."""
-    rows = []
-    for fixture in fixtures.itertuples(index=False):
-        # The synthetic score is never used for this fixture's features because
-        # generate_features snapshots a date before applying that date's result.
-        synthetic = pd.DataFrame(
+    """Reconstruct each future fixture's pre-match features independently.
+
+    Fixture dikelompokkan per tanggal: generate_features melakukan snapshot
+    sebelum menerapkan hasil pada tanggal yang sama, jadi beberapa fixture
+    sedate bisa diproses dalam satu kali run tanpa saling memengaruhi.
+    Fixture beda tanggal tetap dipisah agar skor sintetis fixture lain tidak
+    pernah masuk ke fiturnya.
+    """
+    history_columns = [
+        "match_id",
+        "competition",
+        "season",
+        "datetime",
+        "date",
+        "team_home",
+        "team_away",
+        "goals_home",
+        "goals_away",
+        "result",
+    ]
+    history = historical_matches[history_columns]
+
+    def synthetic_rows(group: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame(
             [
                 {
                     "match_id": fixture.fixture_id,
@@ -138,44 +178,26 @@ def build_ml_feature_rows(
                     "goals_away": 0,
                     "result": "D",
                 }
+                for fixture in group.itertuples(index=False)
             ]
         )
-        combined = pd.concat(
-            [
-                historical_matches[
-                    [
-                        "match_id",
-                        "competition",
-                        "season",
-                        "datetime",
-                        "date",
-                        "team_home",
-                        "team_away",
-                        "goals_home",
-                        "goals_away",
-                        "result",
-                    ]
-                ],
-                synthetic,
-            ],
-            ignore_index=True,
-        )
-        generated = generate_features(combined)
-        feature_row = generated.loc[generated["match_id"] == fixture.fixture_id].iloc[0]
-        home_elo = float(elo_ratings.get(fixture.team_home, ELO_DEFAULT_RATING))
-        away_elo = float(elo_ratings.get(fixture.team_away, ELO_DEFAULT_RATING))
 
-        row = {"fixture_id": fixture.fixture_id}
-        for column in feature_columns:
-            if column == "home_elo_pre":
-                row[column] = home_elo
-            elif column == "away_elo_pre":
-                row[column] = away_elo
-            elif column == "elo_gap_pre":
-                row[column] = home_elo - away_elo
-            else:
-                row[column] = feature_row[column]
-        rows.append(row)
+    generated_parts = []
+    for _, group in fixtures.groupby(fixtures["datetime"].dt.normalize(), sort=True):
+        combined = pd.concat([history, synthetic_rows(group)], ignore_index=True)
+        generated_parts.append(generate_features(combined))
+    generated = pd.concat(generated_parts, ignore_index=True)
+
+    rows = []
+    for fixture in fixtures.itertuples(index=False):
+        matches = generated.loc[generated["match_id"] == fixture.fixture_id]
+        if matches.empty:
+            raise ValueError(
+                f"Fitur untuk fixture {fixture.fixture_id} tidak berhasil dibuat"
+            )
+        rows.append(
+            _build_ml_feature_row(fixture, matches.iloc[0], elo_ratings, feature_columns)
+        )
     return pd.DataFrame(rows)
 
 

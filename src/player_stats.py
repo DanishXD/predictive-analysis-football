@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 
 import pandas as pd
 
@@ -37,8 +38,14 @@ DISCLAIMER = (
 )
 
 
+@lru_cache(maxsize=4)
 def fetch_player_stats(season: str) -> pd.DataFrame:
-    """Fetch and merge standard and shooting stats from FBref."""
+    """Fetch and merge standard and shooting stats from FBref.
+
+    Hasil di-cache per season selama proses berjalan supaya pemanggil
+    berulang (mis. CLI yang butuh data season + match-level) tidak scrape
+    FBref berkali-kali.
+    """
     if sd is None:
         raise RuntimeError(SOCCERDATA_HINT)
     print(f"Mengambil data pemain FBref musim {season}...")
@@ -77,8 +84,8 @@ def fetch_player_stats(season: str) -> pd.DataFrame:
     # Standardize team names
     if "team" in merged.columns:
         merged["team"] = merged["team"].replace(FBREF_TO_CANONICAL)
-    
-    return merged
+
+    return merged.copy()
 
 
 def get_key_players(

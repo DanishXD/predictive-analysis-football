@@ -309,6 +309,11 @@ merah datanya jauh lebih jarang, sehingga confidence model untuk itu lebih renda
 python src/discipline_model.py
 ```
 
+> **Catatan:** `discipline_model.py` juga menyimpan `red_card_model.pkl`, tetapi
+> model kartu merah itu **belum terintegrasi** ke output `predict_match.py`
+> (data kartu merah terlalu jarang sehingga confidencenya rendah) — disimpan
+> sebagai artefak eksperimen saja.
+
 ### Fase 16: Report/Dashboard (Opsional)
 
 Notebook yang merangkum seluruh hasil Fase 1–15 — overview dataset, insight EDA,

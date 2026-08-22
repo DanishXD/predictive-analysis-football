@@ -7,8 +7,8 @@ data/raw/
 data/processed/
 models/
 downloaded_files/
-src/downloaded_files/
 notebooks/figures/
+.pytest_cache/
 .env
 *.env
 .vscode/
