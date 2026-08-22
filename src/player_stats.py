@@ -38,7 +38,7 @@ DISCLAIMER = (
 
 
 def fetch_player_stats(season: str) -> pd.DataFrame:
-    """Fetch and merge standard and shooting stats from FBref with caching."""
+    """Fetch and merge standard and shooting stats from FBref."""
     if sd is None:
         raise RuntimeError(SOCCERDATA_HINT)
     print(f"Mengambil data pemain FBref musim {season}...")

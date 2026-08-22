@@ -25,7 +25,7 @@ Bikin model machine learning & statistik yang bisa memprediksi hasil pertandinga
 - Baseline: Logistic Regression
 - Random Forest
 - XGBoost / LightGBM
-- **(Opsional, Fase lanjutan) Stacking:** masukin output Track A (Elo rating gap, expected goals dari Poisson) sebagai fitur tambahan ke model ML — teknik umum di football analytics buat gabungin kekuatan model statistik + fleksibilitas ML
+- **(Opsional, Fase lanjutan) Stacking:** masukin expected goals dari Poisson & Dixon-Coles sebagai fitur tambahan ke model ML (Elo rating gap sudah jadi fitur dasar) — teknik umum di football analytics buat gabungin kekuatan model statistik + fleksibilitas ML
 - **Class imbalance handling:** Draw itu kelas minoritas & polanya paling susah ditangkep — coba `class_weight='balanced'` (atau teknik sejenis) pas training, jangan cuma didiagnosis pas evaluasi doang
 
 ## 4. Sumber Data

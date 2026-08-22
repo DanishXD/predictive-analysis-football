@@ -137,8 +137,9 @@ python src/statistical_models.py
 ### Fase 5: Track B — Model Machine Learning
 
 Logistic Regression → Random Forest → XGBoost, menggunakan `TimeSeriesSplit`
-(bukan random k-fold) dan `class_weight='balanced'` untuk mengurangi bias model
-yang cenderung mengabaikan kelas Draw (minoritas).
+(bukan random k-fold). Eksperimen `class_weight='balanced'` sempat dicoba untuk
+menangani kelas Draw (minoritas), tetapi di-revert karena RPS lebih diprioritaskan
+— recall Draw rendah dicatat sebagai keterbatasan yang acceptable.
 
 ```powershell
 python src/train_model.py
@@ -146,11 +147,12 @@ python src/train_model.py
 
 ### Fase 6: Stacking (Opsional)
 
-Menambahkan output Track A (Elo rating gap, expected goals dari Poisson) sebagai
-fitur tambahan ke model Track B terbaik.
+Menambahkan expected goals dari Poisson **dan** Dixon-Coles sebagai fitur tambahan
+ke Random Forest (Elo rating gap sudah jadi fitur dasar sejak Fase 5). Percobaan
+controlled dengan OOF xG anti-leakage + bootstrap CI.
 
 ```powershell
-python src/train_model.py --stacking
+python src/stacking.py
 ```
 
 ### Fase 7: Evaluasi Menyeluruh

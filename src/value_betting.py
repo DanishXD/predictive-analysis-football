@@ -51,7 +51,7 @@ DISCLAIMER = (
     "not a real edge."
 )
 DATA_WARNING = (
-    "Only about 1,900 EPL matches were used; market odds beat every model on "
+    "Only about 3,800 EPL matches were used; market odds beat every model on "
     "RPS and log loss in Phase 7."
 )
 

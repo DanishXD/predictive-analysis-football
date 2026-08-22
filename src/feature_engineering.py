@@ -302,7 +302,9 @@ def validate_features(features: pd.DataFrame, expected_rows: int) -> None:
     if features[["match_id", "date", "team_home", "team_away", "result"]].isna().any().any():
         errors.append("missing value pada identifier atau target")
     if features[["home_form5_played", "away_form5_played", "h2h_played"]].max().max() > ROLLING_WINDOW:
-        errors.append("rolling window melebihi lima pertandingan")
+        errors.append(
+            f"rolling window melebihi {ROLLING_WINDOW} pertandingan"
+        )
     if features[["home_league_played", "away_league_played"]].max().max() > 37:
         errors.append("jumlah laga klasemen pre-match melebihi 37")
 

@@ -51,6 +51,6 @@ Jalankan tes setiap kali ubah apapun di `src/`, terutama:
 3. Cek output warning staleness dari `predict_match.py`.
 
 ## Known limitations (jangan "perbaiki" tanpa diskusi)
-- Elo: promoted teams pake fallback (bottom-3 average), bukan Elo kontinental. Rasanya terlalu kompleks untuk scope pembelajaran.
+- Elo: promoted teams coba rating ClubElo dulu; kalau gagal, fallback ke rata-rata bottom-3 musim sebelumnya (bukan Elo kontinental). Elo kontinental rasanya terlalu kompleks untuk scope pembelajaran.
 - Dixon-Coles rho ~ -0.004 (tidak banyak membantu), tetap dipakai karena bagian dari scope.
 - Kenapa mesin odds bandar? Odds mengandung info yang tidak diwujudnyatakan di fitur kita (cedera, line-up, market wisdom). Target realistis: memperkecil gap RPS/log loss, bukan mengalahkannya dengan tipuan.
