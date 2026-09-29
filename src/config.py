@@ -49,6 +49,11 @@ TIME_DECAY_XI = 0.0018
 
 ROLLING_WINDOW = 5
 
+# Musim EPL 2020/2021 dimainkan tanpa penonton (COVID-19 / no-fans). Home
+# advantage musim itu jauh lebih lemah, jadi season ini ditandai agar model bisa
+# "tahu" konteksnya, bukan dibuang dari training.
+EMPTY_STADIUM_SEASONS = ("2020-2021",)
+
 MAX_GOALS = 15
 ELO_K = 20.0
 ELO_HOME_ADVANTAGE = 100.0
@@ -78,6 +83,22 @@ N_SPLITS = 5
 RANDOM_STATE = 42
 
 BOOTSTRAP_SAMPLES = 5000
+
+# Fitur wasit untuk discipline model. Wasit dengan jumlah match lebih sedikit dari
+# REFEREE_MIN_MATCHES di data training di-group jadi "wasit_lain" supaya model
+# tidak overfitting ke wasit yang jarang tampil. Shrinkage (REFEREE_PRIOR_STRENGTH)
+# menarik rate wasit yang jarang ke rata-rata liga.
+#
+# REFEREE_ENABLED mengaktifkan penyesuaian faktor wasit. Statusnya AMBIGU:
+# pada test 2025-26 fitur ini justru memperburuk MAE kartu kuning
+# (1.5986 -> 1.6205, 95% CI [-0.0047, +0.0481], P(delta<=0)=0.0504), jadi
+# buktinya cenderung negatif tapi belum meyakinkan karena sample masih kecil
+# (380 match, 23 wasit). Tetap diaktifkan karena mekanismenya valid dan
+# forward-looking; setel False kalau sample berikutnya juga negatif.
+REFEREE_ENABLED = True
+REFEREE_MIN_MATCHES = 30
+REFEREE_PRIOR_STRENGTH = 30.0
+REFEREE_OTHER_LABEL = "wasit_lain"
 
 CORNER_OVER_UNDER_DEFAULT = 9.5
 YELLOW_OVER_UNDER_DEFAULT = 4.5

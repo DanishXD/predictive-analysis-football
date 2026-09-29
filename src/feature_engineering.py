@@ -6,7 +6,7 @@ from collections import defaultdict, deque
 
 import pandas as pd
 
-from config import PROCESSED_DIR, ROLLING_WINDOW
+from config import EMPTY_STADIUM_SEASONS, PROCESSED_DIR, ROLLING_WINDOW
 
 INPUT_PATH = PROCESSED_DIR / "matches_clean.csv"
 OUTPUT_PATH = PROCESSED_DIR / "features.csv"
@@ -56,6 +56,7 @@ FEATURE_COLUMNS = [
     "away_league_position",
     "away_league_points",
     "away_league_played",
+    "is_empty_stadium",
 ]
 
 
@@ -244,6 +245,9 @@ def generate_features(matches: pd.DataFrame) -> pd.DataFrame:
                 row[f"{side}_league_position"] = positions_by_season[season][team]
                 row[f"{side}_league_points"] = team_table["points"]
                 row[f"{side}_league_played"] = team_table["played"]
+
+            # Known before kickoff (season-level context), so no leakage.
+            row["is_empty_stadium"] = int(season in EMPTY_STADIUM_SEASONS)
 
             row["result"] = match.result
             feature_rows.append(row)

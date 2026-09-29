@@ -9,6 +9,10 @@ import penaltyblog as pb
 from config import (
     MODELS_DIR,
     PROCESSED_DIR,
+    REFEREE_ENABLED,
+    REFEREE_MIN_MATCHES,
+    REFEREE_OTHER_LABEL,
+    REFEREE_PRIOR_STRENGTH,
     TEST_SEASON,
     TIME_DECAY_XI,
     YELLOW_OVER_UNDER_DEFAULT,
@@ -18,6 +22,7 @@ from team_mapping import TEAM_NAME_MAPPING
 INPUT_PATH = PROCESSED_DIR / "matches_clean.csv"
 YELLOW_MODEL_PATH = MODELS_DIR / "yellow_card_model.pkl"
 RED_MODEL_PATH = MODELS_DIR / "red_card_model.pkl"
+REFEREE_FACTORS_PATH = PROCESSED_DIR / "referee_card_factors.csv"
 
 
 def fit_discipline_model(
@@ -103,6 +108,90 @@ def first_card_probability(grid) -> dict:
     }
 
 
+def build_referee_card_factors(
+    train: pd.DataFrame, home_col: str, away_col: str, label: str
+) -> pd.DataFrame:
+    """Hitung faktor pengali kartu per wasit dari data TRAINING saja.
+
+    Anti-leakage: rate wasit dihitung hanya dari pertandingan training. Wasit
+    pertandingan uji sudah diketahui sebelum kick-off, jadi memakai rate
+    historisnya tetap sah. Wasit yang jarang (di bawah REFEREE_MIN_MATCHES)
+    di-group jadi REFEREE_OTHER_LABEL dengan faktor 1.0 (setara rata-rata
+    liga), dan sisanya di-shrink ke rata-rata liga dengan kekuatan prior
+    REFEREE_PRIOR_STRENGTH supaya rate tipis tidak berlebihan.
+    """
+    cards = train[home_col].fillna(0) + train[away_col].fillna(0)
+    league_rate = float(cards.sum() / len(train)) if len(train) else 0.0
+
+    referees = train["referee"]
+    # Kolom referee bisa kosong total kalau sumber data tidak menyediakannya
+    # (mis. scraper penaltyblog). Kembalikan tabel kosong supaya fitur dinonaktifkan
+    # dengan rapi, bukan membentuk satu kategori palsu bernama "nan".
+    if referees.isna().all() or (referees.astype("string").str.strip() == "").all():
+        return pd.DataFrame(
+            columns=[
+                "referee",
+                "training_matches",
+                "total_cards",
+                "raw_rate",
+                "category",
+                "prior_weight",
+                "shrunk_rate",
+                "factor",
+                "league_rate",
+                "label",
+            ]
+        )
+
+    grouped = (
+        pd.DataFrame({"referee": referees, "cards": cards.astype(float)})
+        .groupby("referee", dropna=False)
+        .agg(matches=("cards", "size"), total_cards=("cards", "sum"))
+        .reset_index()
+    )
+    grouped["raw_rate"] = np.where(
+        grouped["matches"] > 0, grouped["total_cards"] / grouped["matches"], league_rate
+    )
+    grouped["category"] = np.where(
+        grouped["matches"] < REFEREE_MIN_MATCHES, REFEREE_OTHER_LABEL, grouped["referee"]
+    )
+    # Untuk wasit yang di-group, shrunk_rate = league_rate (faktor 1.0).
+    grouped["prior_weight"] = np.where(
+        grouped["matches"] < REFEREE_MIN_MATCHES, 0.0, REFEREE_PRIOR_STRENGTH
+    )
+    grouped["shrunk_rate"] = (
+        grouped["matches"] * grouped["raw_rate"] + grouped["prior_weight"] * league_rate
+    ) / (grouped["matches"] + grouped["prior_weight"])
+    grouped.loc[grouped["prior_weight"] == 0.0, "shrunk_rate"] = league_rate
+    grouped["factor"] = np.where(
+        league_rate > 0, grouped["shrunk_rate"] / league_rate, 1.0
+    )
+    grouped["league_rate"] = league_rate
+    grouped["label"] = label
+    grouped = grouped.rename(columns={"matches": "training_matches"})
+    return grouped.sort_values("training_matches", ascending=False, ignore_index=True)
+
+
+def referee_factor_for(referee: str, factors: pd.DataFrame) -> float:
+    """Ambil faktor pengali kartu untuk satu wasit (default 1.0 bila tak dikenal)."""
+    if factors.empty or referee is None or (isinstance(referee, float) and pd.isna(referee)):
+        return 1.0
+    match = factors.loc[factors["referee"] == referee, "factor"]
+    if match.empty:
+        return 1.0
+    return float(match.iloc[0])
+
+
+def apply_referee_factor(grid, factor: float, max_cards: int = 15):
+    """Kalikan expected kartu home & away dengan faktor wasit, lalu bangun grid baru."""
+    if factor == 1.0:
+        return grid
+    home, away = expected_cards(grid)
+    return pb.models.create_dixon_coles_grid(
+        home * factor, away * factor, rho=0.0, max_goals=max_cards
+    )
+
+
 def get_discipline_strengths(model, all_teams: list[str], label: str) -> pd.DataFrame:
     """Return discipline-attack and discipline-defense parameters per team."""
     rows = []
@@ -163,14 +252,49 @@ def main() -> None:
     )
     yellow_model.save(str(YELLOW_MODEL_PATH))
 
+    # Referee card factors, fitted on TRAIN only (anti-leakage).
+    if "referee" not in train.columns:
+        referee_factors = pd.DataFrame()
+        print("\nPERINGATAN: kolom 'referee' tidak ada, fitur wasit dilewati.")
+    elif not REFEREE_ENABLED:
+        referee_factors = pd.DataFrame()
+        print("\nFitur wasit dinonaktifkan lewat config.REFEREE_ENABLED = False.")
+    else:
+        referee_factors = build_referee_card_factors(
+            train, "yellow_cards_home", "yellow_cards_away", "yellow"
+        )
+
+    if referee_factors.empty and REFEREE_ENABLED and "referee" in train.columns:
+        print(
+            "Fitur wasit dilewati: tidak ada nama wasit yang bisa dipakai "
+            "(kolom kosong di data training)."
+        )
+    elif not referee_factors.empty:
+        referee_factors.to_csv(REFEREE_FACTORS_PATH, index=False)
+        n_grouped = int((referee_factors["category"] == REFEREE_OTHER_LABEL).sum())
+        n_known = int((referee_factors["category"] != REFEREE_OTHER_LABEL).sum())
+        print(
+            f"\nFitur wasit: {n_known} wasit dengan >= {REFEREE_MIN_MATCHES} match "
+            f"training, {n_grouped} di-group jadi '{REFEREE_OTHER_LABEL}'"
+        )
+        print(
+            f"  Faktor kartu range: "
+            f"{referee_factors['factor'].min():.3f} - {referee_factors['factor'].max():.3f} "
+            f"(1.0 = rata-rata liga)"
+        )
+        print(f"  Tabel faktor: {REFEREE_FACTORS_PATH}")
+
     yellow_rows = []
     for match in test.sort_values(["datetime", "match_id"]).itertuples(index=False):
         grid, cold = predict_discipline_fixture(
             yellow_model, match.team_home, match.team_away
         )
         exp_home, exp_away = expected_cards(grid)
-        ou = over_under_probability(grid, YELLOW_OVER_UNDER_DEFAULT)
-        fc = first_card_probability(grid)
+        factor = referee_factor_for(getattr(match, "referee", None), referee_factors)
+        adjusted = apply_referee_factor(grid, factor)
+        adj_home, adj_away = expected_cards(adjusted)
+        ou = over_under_probability(adjusted, YELLOW_OVER_UNDER_DEFAULT)
+        fc = first_card_probability(adjusted)
         yellow_rows.append(
             {
                 "match_id": match.match_id,
@@ -178,11 +302,14 @@ def main() -> None:
                 "datetime": match.datetime,
                 "team_home": match.team_home,
                 "team_away": match.team_away,
+                "referee": getattr(match, "referee", None),
+                "referee_factor": factor,
                 "actual_yellow_home": match.yellow_cards_home,
                 "actual_yellow_away": match.yellow_cards_away,
-                "expected_yellow_home": exp_home,
-                "expected_yellow_away": exp_away,
-                "expected_total_yellow": exp_home + exp_away,
+                "expected_yellow_home": adj_home,
+                "expected_yellow_away": adj_away,
+                "expected_total_yellow": adj_home + adj_away,
+                "expected_total_yellow_no_referee": exp_home + exp_away,
                 "yellow_over_under_threshold": ou["threshold"],
                 "prob_yellow_over": ou["over"],
                 "prob_yellow_under": ou["under"],
@@ -199,6 +326,22 @@ def main() -> None:
         index=False,
         date_format="%Y-%m-%d %H:%M:%S",
     )
+
+    # Dampak fitur wasit: error absolut kartu kuning total, dengan vs tanpa.
+    actual_total = yellow_test["actual_yellow_home"] + yellow_test["actual_yellow_away"]
+    mae_ref = float((yellow_test["expected_total_yellow"] - actual_total).abs().mean())
+    mae_no_ref = float(
+        (yellow_test["expected_total_yellow_no_referee"] - actual_total).abs().mean()
+    )
+    n_adjusted = int((yellow_test["referee_factor"] != 1.0).sum())
+    print(
+        f"\nDampak fitur wasit (test {TEST_SEASON}, {len(yellow_test)} match):"
+    )
+    print(f"  MAE total kartu kuning tanpa fitur wasit : {mae_no_ref:.4f}")
+    print(f"  MAE total kartu kuning dengan fitur wasit: {mae_ref:.4f}")
+    print(f"  Selisih MAE                              : {mae_ref - mae_no_ref:+.4f}")
+    print(f"  Match yang benar-benar disesuaikan        : {n_adjusted}/{len(yellow_test)}")
+
     yellow_strengths = get_discipline_strengths(yellow_model, all_teams, "yellow")
     yellow_strengths.to_csv(
         PROCESSED_DIR / "yellow_card_team_strengths.csv", index=False
