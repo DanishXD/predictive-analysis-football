@@ -147,10 +147,15 @@ def build_models() -> dict[str, Pipeline]:
     }
 
 
-def date_based_time_splits(data: pd.DataFrame):
-    """Apply TimeSeriesSplit to unique dates so a date never spans two folds."""
+def date_based_time_splits(data: pd.DataFrame, n_splits: int = N_SPLITS):
+    """Apply TimeSeriesSplit to unique dates so a date never spans two folds.
+
+    `n_splits` opsional supaya adapter cv (mis. untuk GridSearchCV di
+    model_tuning.py) bisa meminta jumlah fold lain tanpa menduplikasi logika.
+    Default tetap N_SPLITS supaya perilaku Fase 5 tidak berubah.
+    """
     unique_dates = np.array(sorted(data["date"].unique()))
-    splitter = TimeSeriesSplit(n_splits=N_SPLITS)
+    splitter = TimeSeriesSplit(n_splits=n_splits)
 
     for fold, (train_date_idx, validation_date_idx) in enumerate(
         splitter.split(unique_dates), start=1

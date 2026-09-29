@@ -1,0 +1,91 @@
+{
+  "purpose": "Eksperimen tuning. Model produksi tidak diubah.",
+  "cv_strategy": "DateTimeSeriesSplit(5 fold, forward-only by date)",
+  "scoring": "RPS (custom scorer, lower is better)",
+  "n_train": 3420,
+  "n_test": 380,
+  "grids": {
+    "random_forest": {
+      "classifier__n_estimators": [
+        250,
+        400
+      ],
+      "classifier__max_depth": [
+        6,
+        10,
+        null
+      ],
+      "classifier__min_samples_leaf": [
+        3,
+        8
+      ]
+    },
+    "xgboost": {
+      "classifier__n_estimators": [
+        200,
+        350,
+        500
+      ],
+      "classifier__learning_rate": [
+        0.02,
+        0.05,
+        0.1
+      ],
+      "classifier__max_depth": [
+        2,
+        3,
+        5
+      ]
+    }
+  },
+  "best_params": {
+    "random_forest": {
+      "classifier__max_depth": null,
+      "classifier__min_samples_leaf": 8,
+      "classifier__n_estimators": 250
+    },
+    "xgboost": {
+      "classifier__learning_rate": 0.02,
+      "classifier__max_depth": 2,
+      "classifier__n_estimators": 200
+    }
+  },
+  "before_after": [
+    {
+      "model": "random_forest",
+      "default_oof_rps": 0.20348166227163794,
+      "default_oof_log_loss": 0.9821556401719314,
+      "default_test_rps": 0.21142088236143516,
+      "default_test_log_loss": 1.0376015548720172,
+      "default_test_accuracy": 0.47368421052631576,
+      "default_test_draw_predictions": 2,
+      "tuned_oof_rps": 0.20321079353435315,
+      "tuned_oof_log_loss": 0.9814638043977536,
+      "tuned_test_rps": 0.2114074265746627,
+      "tuned_test_log_loss": 1.038694959916221,
+      "tuned_test_accuracy": 0.48157894736842105,
+      "tuned_test_draw_predictions": 4,
+      "delta_oof_rps": -0.0002708687372847962,
+      "delta_test_rps": -1.3455786772476053e-05,
+      "delta_test_log_loss": 0.0010934050442037435
+    },
+    {
+      "model": "xgboost",
+      "default_oof_rps": 0.20546682493145008,
+      "default_oof_log_loss": 0.999774694442749,
+      "default_test_rps": 0.21640493862368027,
+      "default_test_log_loss": 1.0572545528411865,
+      "default_test_accuracy": 0.4763157894736842,
+      "default_test_draw_predictions": 2,
+      "tuned_oof_rps": 0.202960037971923,
+      "tuned_oof_log_loss": 0.9795496463775635,
+      "tuned_test_rps": 0.21386042268717342,
+      "tuned_test_log_loss": 1.0462387800216675,
+      "tuned_test_accuracy": 0.4842105263157895,
+      "tuned_test_draw_predictions": 0,
+      "delta_oof_rps": -0.0025067869595270798,
+      "delta_test_rps": -0.0025445159365068415,
+      "delta_test_log_loss": -0.011015772819519043
+    }
+  ]
+}
