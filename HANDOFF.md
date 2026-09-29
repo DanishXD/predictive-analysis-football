@@ -1,0 +1,412 @@
+# HANDOFF — football-predictive-analysis
+
+Dokumen ini untuk **agent yang mulai bekerja di repo ini dari IDE (Orca)**, agar tidak
+perlu membaca ulang 12 commit + seluruh percakapan sebelumnya.
+
+**Dibuat:** 29 September 2026
+**Project root:** `C:\Users\danis\Documents\football-predictive-analysis`
+
+> PENTING: kalau CLI Anda berada di `C:\Users\danis`, itu **bukan** project root.
+> Semua perintah harus dijalankan dari `C:\Users\danis\Documents\football-predictive-analysis`.
+
+---
+
+## 0. TL;DR
+
+| | |
+|---|---|
+| Model produksi | **xgboost** (winner CV log loss) |
+| Commit | 12 commit sesi ini, **sudah ter-push** ke `origin/main` |
+| Tes | 92 lulus, 0 gagal |
+| Git | `main` == `origin/main`, working tree bersih |
+| Status | Pipeline lengkap Fase 1-19, plus 2 eksperimen (kalibrasi, tuning) |
+| Topik terbuka | Explorasi xG-based model — **Understat DITOLAK**, butuh keputusan user |
+
+---
+
+## 1. Project apa ini
+
+Project **pembelajaran data science**: prediksi hasil pertandingan EPL (H/D/A + corner +
+kartu + pemain). Bukan alat rekomendasi betting, dan selalu ada disclaimer di output.
+
+Sumber data utama: football-data.co.uk (goals, shot, corner, kartu, odds, wasit),
+ClubElo (rating tim cold-start), FBref (pemain, opsional).
+
+10 musim EPL 2016/17 - 2025/26, 3.800 pertandingan, 34 tim.
+Test season: **2025-2026** (380 match, out-of-sample).
+
+---
+
+## 2. Status produksi saat ini
+
+### 2.1 Pemilihan model (CV log loss, TimeSeriesSplit 5-fold)
+
+| model | track | cv_log_loss_mean | cv_accuracy_mean | basis |
+|---|---|---|---|---|
+| **xgboost** | Track B | **0.980369** | 0.546874 | TimeSeriesSplit 5-fold CV |
+| random_forest | Track B | 0.982640 | 0.545098 | TimeSeriesSplit 5-fold CV |
+| logistic_regression | Track B | 1.016022 | 0.526199 | TimeSeriesSplit 5-fold CV |
+| poisson | Track A | 0.983279 | 0.537719 | train-only single split (no CV) |
+| dixon_coles | Track A | 0.983277 | 0.537719 | train-only single split (no CV) |
+| elo | Track A | 0.988762 | 0.536550 | train-only single split (no CV) |
+
+### 2.2 Performa di test season 2025-26 (380 match)
+
+| model | accuracy | log_loss | brier | RPS | ECE | draw_recall |
+|---|---|---|---|---|---|---|
+| bookmaker_avg_odds | 0.494737 | 1.015252 | 0.610025 | **0.205280** | 0.040011 | 0.0 |
+| random_forest | 0.473684 | 1.037602 | 0.623542 | 0.211421 | 0.040824 | 0.0 |
+| xgboost | 0.486842 | 1.045309 | 0.629293 | 0.213533 | 0.045375 | 0.0 |
+| logistic_regression | 0.478947 | 1.044979 | 0.630406 | 0.214109 | 0.051588 | 0.0 |
+| elo | 0.484211 | 1.075032 | 0.641466 | 0.216117 | 0.070728 | 0.0 |
+| dixon_coles | 0.465789 | 1.072190 | 0.645820 | 0.222052 | 0.065594 | 0.0 |
+| poisson | 0.465789 | 1.072295 | 0.645906 | 0.222058 | 0.066965 | 0.0 |
+
+Tidak ada model yang mengalahkan bookmaker. Ini jujur dan sesuai scope.
+
+### 2.3 Konfigurasi kunci (`src/config.py`)
+
+```python
+TEST_SEASON = "2025-2026"     N_SPLITS = 5              RANDOM_STATE = 42
+TIME_DECAY_XI = 0.0018        ELO_K = 20.0              ELO_HOME_ADVANTAGE = 100.0
+ELO_DEFAULT_RATING = 1500.0   BOOTSTRAP_SAMPLES = 5000
+CLUBELO_CACHE_MAX_AGE_DAYS = 7
+EMPTY_STADIUM_SEASONS = ("2020-2021",)
+REFEREE_ENABLED = True        REFEREE_MIN_MATCHES = 30  REFEREE_PRIOR_STRENGTH = 30.0
+ELO_CLUBELO_INTERCEPT = -469.1728                      ELO_CLUBELO_SLOPE = 1.0893
+XGBOOST_TUNED_PARAMS = {"learning_rate": 0.02, "max_depth": 2, "n_estimators": 200}
+```
+
+---
+
+## 3. Peta project
+
+### 3.1 Modul `src/` (15 file)
+
+| File | Fase | Fungsi |
+|---|---|---|
+| `config.py` | - | **Single source of truth semua konstanta**. Jangan definisikan ulang di module lain |
+| `team_mapping.py` | - | Standardisasi nama tim (3 arah: football-data, FBref, ClubElo) |
+| `data_collection.py` | 1 | Fetch + clean -> `matches_clean.csv` |
+| `feature_engineering.py` | 3 | Fitur point-in-time anti-leakage -> `features.csv` |
+| `statistical_models.py` | 4 | Poisson, Dixon-Coles, Elo/Pi-rating + ClubElo cold-start |
+| `train_model.py` | 5 | LogReg / RandomForest / XGBoost |
+| `stacking.py` | 6 | Eksperimen stacking xG (opsional) |
+| `evaluate.py` | 7 | Evaluasi semua model + bootstrap + `cv_model_selection.csv` |
+| `value_betting.py` | 8 | Harness EV (edukasi) |
+| `predict_match.py` | 9 | CLI prediksi interaktif |
+| `player_stats.py` | 10 | Data pemain FBref (opsional, butuh soccerdata) |
+| `corner_model.py` | 11 | Model corner + BTTS |
+| `player_match_model.py` | 13 | Prediksi SOT & kandidat MOTM |
+| `discipline_model.py` | 14 | Kartu kuning/merah + fitur wasit |
+| `model_calibration.py` | 18 | Eksperimen koreksi output probability |
+| `model_tuning.py` | 19 | Eksperimen hyperparameter tuning |
+
+### 3.2 Test (`tests/`, 16 file)
+
+`conftest.py`, `test_config.py`, `test_team_mapping.py`, `test_feature_engineering.py`,
+`test_btts_probability.py`, `test_over_under_probability.py`, `test_select_best_model.py`,
+`test_date_based_time_splits.py`, `test_data_collection_cleaning.py`, `test_clubelo_rating.py`,
+`test_clubelo_cache.py`, `test_cv_model_selection.py`, `test_discipline_referee.py`,
+`test_feature_empty_stadium.py`, `test_model_calibration.py`, `test_model_tuning.py`,
+`test_tuned_xgboost_params.py`
+
+---
+
+## 4. 12 commit sesi ini
+
+| Commit | Isi |
+|---|---|
+| `c87b8e6` | Checkpoint: `config.py`, test suite, docs masuk git untuk pertama kali |
+| `1a0195b` | Bug fix: double-print `sot_disclaimer`, validasi stacking sebelum save, error handling corner/kartu |
+| `bf8fe61` | Sentralisasi semua konstanta & path ke `config.py`, guard AST baru |
+| `44aca7a` | Sinkronisasi docs (hapus klaim `class_weight`, fix `--stacking` phantom) |
+| `d9572ae` | Cache FBref via lru_cache, guard `int(NaN)`, batch fitur, bersihkan notebook |
+| `0b96c55` | 6 file unit test baru (+ bonus fix bug push threshold bulat) |
+| `2c4cc61` | ClubElo rescaling + disk cache + log cold-start |
+| `37eb633` | Fitur `is_empty_stadium` + fitur wasit |
+| `1740114` | `evaluate.py` generate `cv_model_selection.csv` (tadinya file manual) |
+| `7c7cef1` | Phase 18: kalibrasi + draw-prior (hasil negatif) |
+| `a7288e8` | Phase 19: hyperparameter tuning |
+| `34876d0` | XGBoost tuned jadi kandidat produksi |
+
+---
+
+## 5. HASIL NEGATIF — jangan mengulang percobaan ini
+
+Ini bagian terpenting dokumen. Semua sudah diuji dengan cara yang benar (anti-leakage,
+data terpisah). Semuanya gagal.
+
+### 5.1 `class_weight='balanced'` untuk kelas Draw
+Memperbaiki sedikit Draw recall tapi **merusak RPS**. Sudah di-revert. Jangan dicoba lagi.
+
+### 5.2 Post-hoc calibration (Phase 18) - `src/model_calibration.py`
+
+Test season 2025-26, Random Forest:
+
+| variant | RPS | log loss | draw_recall | ECE |
+|---|---|---|---|---|
+| raw | **0.211421** | **1.037602** | 0.000 | **0.040824** |
+| sigmoid (Platt) | 0.213966 (+0.0025) | 1.044824 (+0.0072) | 0.000 | 0.041028 |
+| isotonic | 0.215273 (+0.0039) | 1.050215 (+0.0126) | 0.000 | 0.053895 |
+
+**Kedua metode merusak RPS.** Menarik: sigmoid justru *memperbaiki* ECE out-of-fold
+(0.021557 -> 0.016833), jadi teknik ini bekerja secara teknis, tapi memperbaiki keyakinan
+sambil merusak *urutan* probabilitas. RPS hanya peduli urutan.
+
+### 5.3 Draw-prior adjustment (P(draw) x lambda)
+
+`lambda` dipilih dengan minimasi RPS di CV training (bukan test).
+**Hasil: lambda = 1.00, artinya tidak ada penyesuaian yang membantu.**
+
+Kurva RPS di CV training monoton memburuk seiring naiknya lambda:
+
+```
+lambda   1.0      1.1      1.2      1.3      1.4      1.5
+RPS    0.203482 0.203675 0.204021 0.204497 0.205087 0.205774
+```
+
+> **PELAJARAN PENTING:** eksplorasi awal menghitung sensitivitas lambda di **TEST SET**
+> dan menyimpulkan "lambda 1.3 memperbaiki RPS" (0.210647 vs 0.211421). Itu **salah** -
+> itu test-set overfitting. Begitu dihitung lewat CV training yang benar, sinyalnya hilang.
+> Kalau kamu mengulang eksperimen ini, pastikan hitung angkanya di training, bukan test.
+
+### 5.4 Fitur wasit untuk discipline model
+
+Komis `Referee` **ada** di football-data.co.uk (380/380 per musim) dan sudah dipakai.
+Implementasi: pengali multiplikatif expected cards, rate di-fit dari training saja,
+wasit < 30 match di-group jadi `wasit_lain`, sisanya di-shrink ke rata-rata liga.
+
+**Hasil: MAE kartu kuning memburuk.** 1.5986 -> 1.6205, 95% CI [-0.0047, +0.0481],
+P(delta<=0) = 0.0504. Bukti cenderung negatif tapi belum meyakinkan (sample kecil).
+Di-toggle lewat `config.REFEREE_ENABLED`.
+
+### 5.5 Fitur `is_empty_stadium` (musim 2020/21 no-fans)
+
+Dibatasi: HFA 2020/21 = -0.071 vs musim lain +0.425 poin/match, bootstrap
+95% CI [-0.385, -0.099] -> nyata berbeda. Fitur biner sudah ditambahkan.
+
+**Hasil: tidak signifikan.** Out-of-fold per-match log loss membaik di 3 model tapi CI semua
+melintasi 0 (LogReg +0.0013, RF +0.0007, XGB +0.0014). Feature importance 0.0042,
+peringkat 36 dari 38.
+
+> Keterbatasan struktural: `is_empty_stadium` bernilai **0 untuk 100% test set** (2025-26
+> bukan musim no-fans), jadi mustahil diuji di test season mana pun selama tidak ada
+> musim no-fans lagi. Dampaknya hanya terlihat via CV di training.
+
+### 5.6 Tuning hyperparameter Random Forest
+
+GridSearchCV 12 kombinasi, DateTimeSeriesSplit, objective RPS.
+Parameter terbaik: `max_depth=None, min_samples_leaf=8, n_estimators=250`.
+
+Delta RPS hanya +0.000271, CI [-0.000327, +0.000874] -> **tidak signifikan**.
+Secara praktis RF tidak bergerak dari setting default.
+
+### 5.7 Yang TIDAK berhasil dan tidak dicoba lagi
+- Eksclude musim 2020/21 dari training (membuang data, tidak sesuai scope)
+- Menambah fitur wasit sebagai kategorikal langsung (Poisson penaltyblog hanya support
+  param per-tim + home advantage, bukan kategorikal)
+
+---
+
+## 6. Jebakan teknis yang sudah dibayar mahal
+
+### 6.1 `CalibratedClassifierCV(ensemble=False)` TIDAK bisa dipakai dengan TimeSeriesSplit
+sklearn `cross_val_predict` mewajibkan splitter **non-overlapping**, sedangkan
+TimeSeriesSplit training fold-nya overlap. Akan crash dengan
+`ValueError: cross_val_predict only works for partitions`. Harus `ensemble=True`.
+
+### 6.2 Out-of-fold hanya mencakup 2783 dari 3420 baris
+Baris paling awal tidak pernah masuk validation fold (TimeSeriesSplit butuh history).
+Menghitung metrik di SEMUA baris akan menghasilkan log loss palsu ~7.5 karena probabilitas
+0. **Selalu batasi ke baris tercakup.**
+
+### 6.3 Nested parallelism
+`build_models()` sudah pakai `n_jobs=-1`. Kalau `GridSearchCV(n_jobs=-1)` juga, setiap
+worker membuat thread sendiri -> mesin oversubscribe, proses jauh lebih lambat.
+Gunakan `single_threaded()` di `model_tuning.py`.
+
+### 6.4 Definisi ECE harus one-vs-rest
+`evaluate.py` menghitung ECE per kelas lalu rata-rata (one-vs-rest). Versi top-label
+menghasilkan angka ~8x lebih besar (0.32 vs 0.041) dan TIDAK sebanding dengan
+`evaluation_summary.csv`. `model_calibration.py` sudah pakai definisi yang sama.
+
+### 6.5 `runpy.run_path(..., run_name='__main__')` mereset patch
+Kalau kamu patch konstanta module lalu jalankan skrip via runpy, `from config import ...`
+di dalam skrip akan meng-`reset` global dan patch hilang. Panggil `main()` langsung.
+
+### 6.6 ClubElo rate limit
+`api.clubelo.com` sering 502, `clubelo.com` ikut rate-limit. Tanpa jeda + backoff, satu
+tim bisa dapat rating di run A dan jatuh ke fallback bottom-3 di run B. Itu membikin
+eksperimen before/after tidak apples-to-apples. Cache disk + retry sudah enshrined.
+
+---
+
+## 7. Keputusan desain aktif
+
+### 7.1 ClubElo rescaling
+ClubElo (skala ~1580-1748) dan Elo internal (start 1500, K=20, HFA=100) beda skala, jadi
+9 tim promosi yang dapat ClubElo terlihat lebih kuat artifisial vs 18 tim fallback.
+
+```
+elo_internal = -469.1728 + 1.0893 * elo_clubelo
+```
+Di-fit OLS dari 1309 pasangan rating per-tanggal, 9 tim non-promosi, window chart
+ClubElo, R2 = 0.93. Diterapkan di `get_clubelo_rating` (satu funnel, berlaku untuk API
+maupun chart). 18 tim fallback tetap di skala internal apa adanya.
+
+Verifikasi ulang independen menghasilkan `a=-438.18, b=1.0919, R2=0.9287` -> koefisien
+di config tervalidasi (slope hampir identik, intercept beda 31 poin / 0.8% range).
+
+### 7.2 Disk cache ClubElo
+`data/cache/clubelo_cache.json`, fresh < 7 hari. Kegagalan fetch TIDAK di-cache.
+Retry + backoff di kedua fetcher (`CLUBELO_MAX_ATTEMPTS=4`) karena tanpa itu cache tidak
+pernah terisi penuh (rate limit parah: run 1 hanya 2/25 tim tanpa retry).
+
+### 7.3 Log cold-start
+`data/metadata/elo_coldstart_log.csv` - tim, musim, source yang BENAR-BENAR dipakai,
+raw sebelum rescale, dan nilai sesudah. Row fallback punya `raw_clubelo` kosong supaya
+nilai fallback tidak bisa salah dilabeli sebagai ClubElo.
+
+### 7.4 XGBoost jadi produksi - dengan catatan jujur
+
+XGBoost dipilih karena **aturan main** (selection berbasis CV log loss), bukan karena
+bukti kuat:
+
+- Selisih CV hanya 0.0023, **tidak signifikan** (t-test 5 fold, p=0.28; hanya 3 dari 5
+  fold menguntungkan XGBoost)
+- Di test season Random Forest justru lebih baik pada RPS (0.211421 vs 0.213533)
+  dan log loss (1.037602 vs 1.045309)
+- `evaluate.py` sendiri melaporkan RF vs XGB pairwise tidak signifikan (p=0.100)
+
+> Kalau bukti di musim berikutnya tetap slim, kembalikan `XGBOOST_TUNED_PARAMS` di
+> `config.py` ke nilai lama (`n_estimators=300, learning_rate=0.03, max_depth=3`).
+
+### 7.5 Track A perlu perlakuan khusus untuk musim 2020/21
+Time-decay menyiske musim ini ke 3.6% bobot - efeknya ter-diskon tapi BELUM dihilangkan.
+Poisson/Dixon-Coles punya SATU parameter home_advantage global, jadi tidak bisa
+merepresentasikan musim tanpa penonton. Rekomendasi (belum diimplementasikan):
+parameter HFA terpisah untuk 2020/21. Ini keputusan desain yang perlu didiskusikan dulu.
+
+---
+
+## 8. Koordinasi dengan sesi lain
+
+File berikut **milik sesi/agent lain yang jalan paralel**. Jangan disentuh atau
+di-overwrite:
+
+```
+research/                              # jurnal riset, audit trail (AUDIT-0001, JOURNAL.md)
+src/walk_forward.py                    # modul walk-forward
+data/metadata/dataset_metadata.json    # provenance dataset
+```
+
+Sudah ikut ter-commit di `1740114` (karena satu file): `src/evaluate.py` (bootstrap CI),
+`src/predict_match.py` (model selection berbasis CV), `tests/test_select_best_model.py`.
+
+---
+
+## 9. TOPIK TERBUKA: model berbasis xG
+
+User minta eksplorasi model Poisson berbasis xG (expected goals) sebagai pelengkap model
+goals-based yang sekarang.
+
+### 9.1 Understat DITOLAK - hasil checking
+
+```
+https://understat.com/robots.txt  ->  HTTP 200
+User-agent: *
+Disallow: /
+```
+
+Seluruh situs closed untuk semua crawler. Di-fetch 2x, SHA identik. **Tidak ada** Terms of
+Service, dokumentasi API, maupun kontak lisensi di homepage. Library komunitas
+(`understatapi` dll) tetap ada, tapi dukungan Understat hanya pernah konfirmasi via email
+**8 November 2018** bahwa data boleh dipakai non-komersial, dengan catatan "This stance
+is subject to change". Itu informal 8 tahun lalu, bukan lisensi.
+
+Alasan menolak: konsistensi dengan preseden project ini. FBref sudah ditolak karena
+Selenium + ToS. Kalau Understat lolos hanya karena "praktis ditegakkan", standar yang
+dijaga jadi tidak konsisten.
+
+### 9.2 Data lokal tidak punya xG
+`matches_clean.csv` (33 kolom) dan `data/raw/*.csv` (football-data.co.uk) tidak punya
+kolom xG sama sekali. Tidak ada jalan pintas tanpa sumber baru.
+
+### 9.3 Opsi (BELUM DIPILIH - butuh keputusan user)
+
+| Sumber | Lisensi | xG match-level tim? | Tier |
+|---|---|---|---|
+| **OpenFootAPI** | API resmi, ada metadata lisensi | ya, + arsip 17 musim PL | Free (5k req/bulan) |
+| API-Football | API resmi | perlu verifikasi endpoint | Free 100 req/hari |
+| TheStatsAPI | API berbayar | ya | $50/bulan |
+| BigBallsData | API resmi | **TIDAK** - hanya agregat per-pemain per-musim | Free |
+
+Catatan: BigBallsData dicoret karena endpoint xG-nya season-aggregate, bukan per-match.
+
+**Poin penting**: model xG berbeda antar provider menghasilkan angka yang TIDAK akan
+cocok untuk tembakan yang sama. Kalau ganti sumber, hasilnya tidak sebanding langsung
+dengan eksperimen yang sudah ada.
+
+> User sudah bilang "Oke" tapi **belum memilih opsi A / B / C**. Tanya dulu sebelum kerja.
+
+---
+
+## 10. Cara menjalankan
+
+Semua dari root project dengan interpreter venv:
+
+```powershell
+# Test (selalu jalankan setelah ubah src/)
+.\.venv\Scripts\python.exe -m pytest tests/ -q
+
+# Pipeline (urutan penting)
+.\.venv\Scripts\python.exe src\data_collection.py      # Fase 1 (butuh internet)
+.\.venv\Scripts\python.exe src\feature_engineering.py  # Fase 3
+.\.venv\Scripts\python.exe src\statistical_models.py   # Fase 4
+.\.venv\Scripts\python.exe src\train_model.py          # Fase 5
+.\.venv\Scripts\python.exe src\evaluate.py             # Fase 7
+
+# Prediksi interaktif
+.\.venv\Scripts\python.exe src\predict_match.py
+
+# Eksperimen (opsional)
+.\.venv\Scripts\python.exe src\model_calibration.py    # Fase 18
+.\.venv\Scripts\python.exe src\model_tuning.py         # Fase 19
+```
+
+---
+
+## 11. Peringatan operasional
+
+1. **Push setelah commit.** Sesi ini 12 commit tertahan lokal selama berjam-jam karena
+   lupa push; user kaget GitHub masih 2 bulan. Commit tanpa push = kerja hilang dari
+   pandangan user.
+
+2. **Cek output non-ASCII sebelum commit.** Tiga kali sempat ada karakter Mandarin nyasar
+   di docstring/komentar/commit message. Alasan: menulis teks campuran ID/EN kadang
+   gagal encode. Selalu scan sebelum commit.
+
+3. **Jalankan `pytest` setelah setiap ubahan `src/`**, terutama `config.py`,
+   `feature_engineering.py`, `team_mapping.py`. `tests/test_config.py` punya guard AST
+   yang menangkap konstanta yang didefinisikan ulang di module lain.
+
+4. **Jalankan `git status` sebelum commit** dan cek file mana yang milik sesi lain.
+
+5. **Jangan edit `data/processed/` atau `models/` manual.** Semua harus bisa diambil ulang
+   dengan menjalankan ulang pipeline.
+
+---
+
+## 12. Aturan keras project (dari AGENTS.md)
+
+1. **Anti-leakage**: fitur match T hanya boleh memakai data sebelum T. Split waktu:
+   `season != TEST_SEASON` = train, `TEST_SEASON` = test. TimeSeriesSplit untuk CV.
+2. **Odds bandar adalah benchmark, bukan fitur.**
+3. **Pilihan model terbaik harus berdasarkan CV, bukan hasil test set.**
+4. **Evaluasi jujur**: kalau metrik berubah setelah refactor, jelaskan kenapa.
+5. **`models/` dan `data/processed/`** bisa diambil lagi dengan menjalankan ulang pipeline.
+6. **JANGAN menabrak keputusan di `scope-predictive-analysis-bola.md`** tanpa alasan yang ditulis.
+
+Semua konstanta pipeline di `src/config.py` - single source of truth. Output user-facing
+dalam Bahasa Indonesia casual; docstring teknis dalam Bahasa Inggris.
