@@ -1,0 +1,74 @@
+[
+  {
+    "model": "poisson",
+    "n_matches": 380,
+    "rps_before": 0.2220581135325498,
+    "rps_after": 0.2220581135325498,
+    "observed_delta": 0.0,
+    "delta_median": NaN,
+    "ci_95_low": NaN,
+    "ci_95_high": NaN,
+    "significant": false,
+    "n_matches_changed": 0
+  },
+  {
+    "model": "dixon_coles",
+    "n_matches": 380,
+    "rps_before": 0.22205164413320844,
+    "rps_after": 0.22205164413320844,
+    "observed_delta": 0.0,
+    "delta_median": NaN,
+    "ci_95_low": NaN,
+    "ci_95_high": NaN,
+    "significant": false,
+    "n_matches_changed": 0
+  },
+  {
+    "model": "elo",
+    "n_matches": 380,
+    "rps_before": 0.21805980492154153,
+    "rps_after": 0.21611669844176273,
+    "observed_delta": -0.0019431064797788531,
+    "delta_median": -0.0020318194369480756,
+    "ci_95_low": -0.010171300226584443,
+    "ci_95_high": 0.006261351990594442,
+    "significant": false,
+    "n_matches_changed": 380
+  },
+  {
+    "model": "random_forest",
+    "n_matches": 380,
+    "rps_before": 0.2127949307907018,
+    "rps_after": 0.2111509827490309,
+    "observed_delta": -0.001643948041670826,
+    "delta_median": -0.001813372182492343,
+    "ci_95_low": -0.0069359261203518425,
+    "ci_95_high": 0.0036383654544803216,
+    "significant": false,
+    "n_matches_changed": 380
+  },
+  {
+    "model": "xgboost",
+    "n_matches": 380,
+    "rps_before": 0.21575042301626746,
+    "rps_after": 0.21654704248142276,
+    "observed_delta": 0.0007966194651552937,
+    "delta_median": 0.0004922621534305561,
+    "ci_95_low": -0.006017460867045628,
+    "ci_95_high": 0.008362785547087796,
+    "significant": false,
+    "n_matches_changed": 380
+  },
+  {
+    "model": "logistic_regression",
+    "n_matches": 380,
+    "rps_before": 0.2160863002537548,
+    "rps_after": 0.2145457832400436,
+    "observed_delta": -0.001540517013711148,
+    "delta_median": -0.0015692661453100775,
+    "ci_95_low": -0.008023432788132475,
+    "ci_95_high": 0.005128724968937455,
+    "significant": false,
+    "n_matches_changed": 380
+  }
+]

@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import json
+import time
+from functools import lru_cache
+
 import numpy as np
 import pandas as pd
 import penaltyblog as pb
+import requests
 
 from config import (
+    CLUBELO_CACHE_MAX_AGE_DAYS,
+    DATA_DIR,
+    ELO_CLUBELO_INTERCEPT,
+    ELO_CLUBELO_SLOPE,
+    ELO_COLDSTART_LOG_PATH,
     ELO_DEFAULT_RATING,
     ELO_HOME_ADVANTAGE,
     ELO_K,
@@ -16,13 +28,10 @@ from config import (
     TEST_SEASON,
     TIME_DECAY_XI,
 )
-
-try:
-    import soccerdata as sd
-except ImportError:
-    sd = None
+from team_mapping import CANONICAL_TO_CLUBELO
 
 INPUT_PATH = PROCESSED_DIR / "matches_clean.csv"
+CLUBELO_CACHE_PATH = DATA_DIR / "cache" / "clubelo_cache.json"
 
 
 def fit_goal_models(train: pd.DataFrame):
@@ -183,50 +192,210 @@ def build_test_probabilities(
     return pd.DataFrame(rows)
 
 
-def get_clubelo_rating(team: str, as_of_date: pd.Timestamp) -> float | None:
+CLUBELO_API_BASE = "http://api.clubelo.com/"
+CLUBELO_SITE_BASE = "http://clubelo.com/"
+CLUBELO_TIMEOUT = 15
+CLUBELO_HEADERS = {"User-Agent": "Mozilla/5.0"}
+# clubelo.com rate-limit request beruntun: tanpa jeda/backoff, sebagian tim gagal
+# Taken dan diam-diam jatuh ke fallback bottom-3.
+CLUBELO_REQUEST_DELAY = 1.0
+CLUBELO_MAX_ATTEMPTS = 4
+CLUBELO_BACKOFF = 3.0
+
+
+def _fetch_clubelo_api_history(clubelo_name: str) -> tuple[tuple[str, float], ...] | None:
     """
-    Query ClubElo API for a team's rating as of a specific date.
-    
-    Returns None if ClubElo unavailable or team not found.
+    Fetch a club's full rating history (From date, Elo) from the official
+    ClubElo CSV API. Returns None when the API is unreachable or the club
+    is unknown.
     """
-    if sd is None:
+    for attempt in range(CLUBELO_MAX_ATTEMPTS):
+        try:
+            response = requests.get(
+                CLUBELO_API_BASE + clubelo_name,
+                headers=CLUBELO_HEADERS,
+                timeout=CLUBELO_TIMEOUT,
+            )
+        except requests.RequestException:
+            time.sleep(CLUBELO_REQUEST_DELAY + attempt * CLUBELO_BACKOFF)
+            continue
+        if response.status_code == 200:
+            rows = list(csv.DictReader(io.StringIO(response.text)))
+            history = tuple(
+                (row["From"], float(row["Elo"]))
+                for row in rows
+                if row.get("From") and row.get("Elo")
+            )
+            if history:
+                return history
+        time.sleep(CLUBELO_REQUEST_DELAY + attempt * CLUBELO_BACKOFF)
+    return None
+
+
+def _fetch_clubelo_chart_history(slug: str) -> tuple[tuple[str, float], ...] | None:
+    """
+    Parse the rating history embedded in a club's clubelo.com page (Vega-Lite
+    chart data, roughly the last four years). Returns None when the page has
+    no usable chart data.
+    """
+    for attempt in range(CLUBELO_MAX_ATTEMPTS):
+        try:
+            response = requests.get(
+                CLUBELO_SITE_BASE + slug,
+                headers=CLUBELO_HEADERS,
+                timeout=CLUBELO_TIMEOUT,
+            )
+        except requests.RequestException:
+            time.sleep(CLUBELO_REQUEST_DELAY + attempt * CLUBELO_BACKOFF)
+            continue
+        if response.status_code != 200:
+            time.sleep(CLUBELO_REQUEST_DELAY + attempt * CLUBELO_BACKOFF)
+            continue
+        marker = "var vegaJson = "
+        start = response.text.find(marker)
+        if start < 0:
+            return None
+        try:
+            spec, _ = json.JSONDecoder().raw_decode(
+                response.text[start + len(marker) :].lstrip()
+            )
+            datasets = spec.get("datasets", {})
+        except json.JSONDecodeError:
+            return None
+        history = tuple(
+            sorted(
+                (str(row["Date"])[:10], float(row["Elo"]))
+                for rows in datasets.values()
+                for row in rows
+                if isinstance(row, dict) and "Date" in row and "Elo" in row
+            )
+        )
+        if history:
+            return history
         return None
-    
+    return None
+
+
+def _load_clubelo_cache() -> dict:
+    """Baca cache ClubElo dari disk; kembalikan dict kosong bila tidak ada/rusak."""
+    if not CLUBELO_CACHE_PATH.exists():
+        return {}
     try:
-        # ClubElo uses specific date format
-        date_str = as_of_date.strftime("%Y-%m-%d")
-        clubelo = sd.ClubElo()
-        
-        # ClubElo team name mapping (EPL canonical -> ClubElo format)
-        # Most names match, but some need mapping
-        team_mapping = {
-            "Brighton & Hove Albion": "Brighton",
-            "Manchester City": "Man City",
-            "Manchester United": "Man United",
-            "Newcastle United": "Newcastle",
-            "Nottingham Forest": "Nott'm Forest",
-            "Sheffield United": "Sheffield Utd",
-            "Tottenham Hotspur": "Tottenham",
-            "West Ham United": "West Ham",
-            "Wolverhampton Wanderers": "Wolves",
-        }
-        clubelo_name = team_mapping.get(team, team)
-        
-        # Get rating history up to the date
-        ratings = clubelo.read_by_date(date_str)
-        
-        # Filter for the team
-        team_rating = ratings[ratings.index.get_level_values('team') == clubelo_name]
-        
-        if not team_rating.empty:
-            # Get the most recent rating before or on the date
-            return float(team_rating['elo'].iloc[-1])
-        
+        payload = json.loads(CLUBELO_CACHE_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_clubelo_cache(cache: dict) -> None:
+    """Tulis cache ClubElo ke disk; kegagalan I/O tidak boleh menggagalkan pipeline."""
+    try:
+        CLUBELO_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CLUBELO_CACHE_PATH.write_text(
+            json.dumps(cache, indent=1, sort_keys=True), encoding="utf-8"
+        )
+    except OSError as exc:
+        print(f"Peringatan: cache ClubElo gagal ditulis ({exc})")
+
+
+def _cache_entry_is_fresh(entry: dict, now: float) -> bool:
+    """Cache dianggap fresh bila berumur < CLUBELO_CACHE_MAX_AGE_DAYS hari."""
+    fetched_at = entry.get("fetched_at")
+    if not isinstance(fetched_at, (int, float)):
+        return False
+    max_age_seconds = CLUBELO_CACHE_MAX_AGE_DAYS * 86400
+    return (now - fetched_at) < max_age_seconds
+
+
+@lru_cache(maxsize=None)
+def _clubelo_history(clubelo_name: str) -> tuple[str, tuple[tuple[str, float], ...]] | None:
+    """Resolve satu klub: cache disk dulu, lalu API, lalu chart halaman klub.
+
+    Cache disk adalah sumber pertama supaya dua run pipeline memakai history
+    ClubElo yang identik meski jaringan sedang rate-limited. Entry yang dicache
+    selalu berupa hasil yang berhasil diambil; kegagalan fetch tidak di-cache
+    supaya run berikutnya tetap mencoba jaringan.
+    """
+    now = time.time()
+    cache = _load_clubelo_cache()
+    cached = cache.get(clubelo_name)
+    if isinstance(cached, dict) and _cache_entry_is_fresh(cached, now):
+        history = tuple(
+            (str(date), float(elo)) for date, elo in cached.get("history", [])
+        )
+        if history:
+            return str(cached["source"]), history
+
+    api_history = _fetch_clubelo_api_history(clubelo_name)
+    if api_history is not None:
+        source, history = "clubelo_api", api_history
+    else:
+        slug = clubelo_name.replace(" ", "").replace("'", "")
+        chart_history = _fetch_clubelo_chart_history(slug)
+        if chart_history is None:
+            return None
+        source, history = "clubelo_chart", chart_history
+
+    cache[clubelo_name] = {
+        "source": source,
+        "fetched_at": now,
+        "history": [[date, elo] for date, elo in history],
+    }
+    _save_clubelo_cache(cache)
+    return source, history
+
+
+def get_clubelo_rating(team: str, as_of_date: pd.Timestamp) -> tuple[float, str] | None:
+    """
+    Get a team's ClubElo rating strictly before as_of_date (anti-leakage:
+    pre-match rating, never the rating produced by a match on that date),
+    rescaled to the internal Elo scale via ELO_CLUBELO_INTERCEPT/SLOPE so
+    cold-start values are comparable with internally-evolved ratings.
+
+    Returns (rating, source) where source is "clubelo_api" or "clubelo_chart",
+    or None when ClubElo has no rating for the team before that date.
+    """
+    clubelo_name = CANONICAL_TO_CLUBELO.get(team, team)
+    resolved = _clubelo_history(clubelo_name)
+    if resolved is None:
         return None
-        
-    except Exception:
-        # ClubElo API down, network error, or team not found
+    source, history = resolved
+    date_str = as_of_date.strftime("%Y-%m-%d")
+    prior = [elo for date, elo in history if date < date_str]
+    if not prior:
         return None
+    raw_rating = prior[-1]
+    rescaled = ELO_CLUBELO_INTERCEPT + ELO_CLUBELO_SLOPE * raw_rating
+    return rescaled, source
+
+
+def get_clubelo_rating_detail(team: str, as_of_date: pd.Timestamp) -> dict | None:
+    """
+    Versi `get_clubelo_rating` yang juga melaporkan rating ClubElo mentah.
+
+    Dipakai untuk log cold-start supaya nilai sebelum-sesudah rescale tercatat
+    eksplisit di metadata, tanpa harus menebak dari tabel diagnosa.
+
+    Returns dict dengan kunci team, source, rating_date, raw_clubelo,
+    rescaled; atau None bila ClubElo tidak punya rating sebelum as_of_date.
+    """
+    clubelo_name = CANONICAL_TO_CLUBELO.get(team, team)
+    resolved = _clubelo_history(clubelo_name)
+    if resolved is None:
+        return None
+    source, history = resolved
+    date_str = as_of_date.strftime("%Y-%m-%d")
+    prior = [(date, elo) for date, elo in history if date < date_str]
+    if not prior:
+        return None
+    rating_date, raw_rating = prior[-1]
+    return {
+        "team": team,
+        "source": source,
+        "rating_date": rating_date,
+        "raw_clubelo": raw_rating,
+        "rescaled": ELO_CLUBELO_INTERCEPT + ELO_CLUBELO_SLOPE * raw_rating,
+    }
 
 
 def get_bottom_three_average_elo(
@@ -333,15 +502,18 @@ def build_elo_history(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame
             
             for team in promoted:
                 # Try ClubElo first
-                clubelo_rating = get_clubelo_rating(team, first_match_date)
-                
-                if clubelo_rating is not None:
-                    elo.ratings[team] = clubelo_rating
+                clubelo_detail = get_clubelo_rating_detail(team, first_match_date)
+
+                if clubelo_detail is not None:
+                    elo.ratings[team] = clubelo_detail["rescaled"]
                     cold_start_log.append({
                         'season': season,
                         'team': team,
-                        'elo_rating': clubelo_rating,
-                        'source': 'ClubElo',
+                        'source': clubelo_detail["source"],
+                        'rating_date': clubelo_detail["rating_date"],
+                        'raw_clubelo': clubelo_detail["raw_clubelo"],
+                        'rescaled': clubelo_detail["rescaled"],
+                        'elo_rating': clubelo_detail["rescaled"],
                     })
                 else:
                     # Fallback: average of bottom 3 from previous season
@@ -352,8 +524,11 @@ def build_elo_history(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame
                     cold_start_log.append({
                         'season': season,
                         'team': team,
+                        'source': 'fallback_bottom3',
+                        'rating_date': None,
+                        'raw_clubelo': None,
+                        'rescaled': None,
                         'elo_rating': fallback_rating,
-                        'source': 'bottom_3_average_fallback',
                     })
         
         # Process matches for this season
@@ -410,11 +585,43 @@ def build_elo_history(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame
     
     # Log cold-start info
     if cold_start_log:
+        cold_start_frame = pd.DataFrame(cold_start_log)[
+            [
+                "season",
+                "team",
+                "source",
+                "rating_date",
+                "raw_clubelo",
+                "rescaled",
+                "elo_rating",
+            ]
+        ]
+        clubelo_rows = int(cold_start_frame["source"].str.startswith("clubelo").sum())
         print("\nElo cold-start untuk tim promosi:")
         for entry in cold_start_log:
-            print(f"  {entry['season']} - {entry['team']}: {entry['elo_rating']:.1f} ({entry['source']})")
-    
+            print(
+                f"  {entry['season']} - {entry['team']}: "
+                f"{entry['elo_rating']:.1f} ({entry['source']})"
+            )
+        print(
+            f"  ClubElo: {clubelo_rows}/{len(cold_start_frame)} tim, "
+            f"fallback bottom-3: {len(cold_start_frame) - clubelo_rows} tim"
+        )
+        write_coldstart_log(cold_start_frame)
+        print(f"  Log cold-start: {ELO_COLDSTART_LOG_PATH}")
+    else:
+        print("\nElo cold-start: tidak ada tim promosi di dataset ini")
+
     return history, final_ratings
+
+
+def write_coldstart_log(cold_start_frame: pd.DataFrame) -> None:
+    """Tulis metadata cold-start ke CSV; kegagalan I/O tidak menggagalkan pipeline."""
+    try:
+        ELO_COLDSTART_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        cold_start_frame.to_csv(ELO_COLDSTART_LOG_PATH, index=False)
+    except OSError as exc:
+        print(f"Peringatan: log cold-start gagal ditulis ({exc})")
 
 
 def build_model_metrics(poisson, dixon_coles, train: pd.DataFrame) -> pd.DataFrame:

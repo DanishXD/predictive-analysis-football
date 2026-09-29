@@ -54,6 +54,26 @@ ELO_K = 20.0
 ELO_HOME_ADVANTAGE = 100.0
 ELO_DEFAULT_RATING = 1500.0
 
+# Rescale rating ClubElo mentah ke skala Elo internal (start 1500, K=20,
+# HFA=100). Di-fit OLS 2026-09-26 dari 2787 pasangan rating per-tanggal milik
+# 14 tim EPL non-promosi pada window chart ClubElo 2022-10 s/d 2026-09
+# (R2 0.92): elo_internal ~ ELO_CLUBELO_INTERCEPT + ELO_CLUBELO_SLOPE *
+# elo_clubelo. Refit kalau ClubElo ganti skala lagi atau API CSV sudah pulih
+# dan menyajikan skala berbeda dari chart.
+ELO_CLUBELO_INTERCEPT = -469.1728
+ELO_CLUBELO_SLOPE = 1.0893
+
+# ClubElo sering tidak terjangkau (API 502 / rate limit) sehingga satu tim bisa
+# dapat rating di run A dan jatuh ke fallback bottom-3 di run B. Cache disk
+# membuat dua run memakai history ClubElo yang identik, jadi eksperimen
+# before/after tetap apples-to-apples. Cache dianggap fresh selama
+# < CLUBELO_CACHE_MAX_AGE_DAYS hari.
+CLUBELO_CACHE_MAX_AGE_DAYS = 7
+
+# Metadata cold-start Elo tiap run: tim, musim, sumber yang benar-benar dipakai,
+# raw sebelum rescale, dan nilai sesudah rescale.
+ELO_COLDSTART_LOG_PATH = DATA_DIR / "metadata" / "elo_coldstart_log.csv"
+
 N_SPLITS = 5
 RANDOM_STATE = 42
 

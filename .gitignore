@@ -9,6 +9,16 @@ models/
 downloaded_files/
 notebooks/figures/
 .pytest_cache/
+
+# Raw fetch blob ClubElo (regenerable dari jaringan) — sama kategori dengan
+# downloaded_files/. Cache ini tidak perlu di-commit.
+data/cache/
+
+# Snapshot output pipeline per-mode untuk perbandingan rescaling before/after.
+# Duplikat dari data/processed/ yang sudah di-ignore; tabel ringkasan
+# rescale_compare/*.csv & *.json tetap di-commit sebagai hasil eksperimen.
+data/metadata/rescale_compare/after/
+data/metadata/rescale_compare/before/
 .env
 *.env
 .vscode/
