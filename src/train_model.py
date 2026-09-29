@@ -25,6 +25,7 @@ from config import (
     TARGET_MAPPING,
     TARGET_NAMES,
     TEST_SEASON,
+    XGBOOST_TUNED_PARAMS,
 )
 
 FEATURES_PATH = PROCESSED_DIR / "features.csv"
@@ -130,9 +131,13 @@ def build_models() -> dict[str, Pipeline]:
                     XGBClassifier(
                         objective="multi:softprob",
                         eval_metric="mlogloss",
-                        n_estimators=300,
-                        learning_rate=0.03,
-                        max_depth=3,
+                        # Di-set dari config hasil Phase 19 (GridSearchCV +
+                        # DateTimeSeriesSplit + objective RPS). Nilai lama
+                        # n_estimators=300 / learning_rate=0.03 / max_depth=3
+                        # diganti agar XGBoost bersaing sebagai kandidat produksi.
+                        n_estimators=XGBOOST_TUNED_PARAMS["n_estimators"],
+                        learning_rate=XGBOOST_TUNED_PARAMS["learning_rate"],
+                        max_depth=XGBOOST_TUNED_PARAMS["max_depth"],
                         min_child_weight=5,
                         subsample=0.8,
                         colsample_bytree=0.8,

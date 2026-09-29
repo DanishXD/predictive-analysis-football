@@ -82,6 +82,23 @@ ELO_COLDSTART_LOG_PATH = DATA_DIR / "metadata" / "elo_coldstart_log.csv"
 N_SPLITS = 5
 RANDOM_STATE = 42
 
+# Hyperparameter XGBoost hasil Phase 19 (src/model_tuning.py), dicari dengan
+# GridSearchCV(cv=DateTimeSeriesSplit, scoring=RPS). Diterapkan di
+# train_model.build_models() supaya model XGBoost yang dilatih di Fase 5 memakai
+# setting ini, bukan nilai lama yang hardcode di build_models().
+#
+# Catatan jujur: pada CV log loss XGBoost tuned menang tipis dari Random Forest
+# (0.980000 vs 0.982640) tetapi selisihnya TIDAK signifikan (t-test 5 fold
+# p=0.28). Di test season 2025-26 Random Forest justru lebih baik pada RPS
+# (0.211421 vs 0.213860) dan log loss (1.037602 vs 1.046239). Jadi ini
+# perbaikan yang belum meyakinkan; kalau bukti di musim berikutnya tetap
+# slim, kembalikan ke nilai lama.
+XGBOOST_TUNED_PARAMS = {
+    "learning_rate": 0.02,
+    "max_depth": 2,
+    "n_estimators": 200,
+}
+
 BOOTSTRAP_SAMPLES = 5000
 
 # Fitur wasit untuk discipline model. Wasit dengan jumlah match lebih sedikit dari
