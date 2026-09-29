@@ -16,10 +16,10 @@ perlu membaca ulang 12 commit + seluruh percakapan sebelumnya.
 | | |
 |---|---|
 | Model produksi | **xgboost** (winner CV log loss) |
-| Commit | 12 commit sesi ini, **sudah ter-push** ke `origin/main` |
-| Tes | 92 lulus, 0 gagal |
+| Tes | **125 lulus**, 0 gagal (92 sebelum sesi 29 Sep) |
 | Git | `main` == `origin/main`, working tree bersih |
-| Status | Pipeline lengkap Fase 1-19, plus 2 eksperimen (kalibrasi, tuning) |
+| Status | Pipeline Fase 1-19 + 4 eksperimen (kalibrasi, tuning, Track A CV, seasonal HFA) |
+| Hasil negatif | **8 tercatat** (§5.1-§5.7) — baca sebelum eksperimen baru |
 | Topik terbuka | Explorasi xG-based model — **Understat DITOLAK**, butuh keputusan user |
 
 ---
@@ -135,7 +135,11 @@ XGBOOST_TUNED_PARAMS = {"learning_rate": 0.02, "max_depth": 2, "n_estimators": 2
 ## 5. HASIL NEGATIF — jangan mengulang percobaan ini
 
 Ini bagian terpenting dokumen. Semua sudah diuji dengan cara yang benar (anti-leakage,
-data terpisah). Semuanya gagal.
+data terpisah, angka penentu dari training/CV). Semuanya gagal.
+
+> **Perbarui 29 Sep 2026:** §5.7 (HFA terpisah per musim no-fans) ditambahkan.
+> Catatan khusus §5.3 berlaku untuk semua eksperimen baru: kalau sensitivitas
+> dihitung di TEST set, hasilnya akan terlihat bagus tapi salah.
 
 ### 5.1 `class_weight='balanced'` untuk kelas Draw
 Memperbaiki sedikit Draw recall tapi **merusak RPS**. Sudah di-revert. Jangan dicoba lagi.
@@ -202,10 +206,37 @@ Parameter terbaik: `max_depth=None, min_samples_leaf=8, n_estimators=250`.
 Delta RPS hanya +0.000271, CI [-0.000327, +0.000874] -> **tidak signifikan**.
 Secara praktis RF tidak bergerak dari setting default.
 
-### 5.7 Yang TIDAK berhasil dan tidak dicoba lagi
+### 5.7 HFA terpisah untuk musim no-fans 2020/21 - `src/seasonal_hfa.py`
+
+Rekomendasi sendiri di §7.5, sekarang sudah diuji. Profile likelihood: HFA
+di-search ulang dengan attack/defense dibekukan dari fit penuh.
+
+```
+HFA normal  +0.1954     HFA no-fans  +0.0547     delta -0.1407
+Bootstrap 95% CI selisih HFA: [-0.2849, -0.0723]  -> SIGNIFIKAN
+Varian A (HFA tanpa musim no-fans) di 4 fold: delta log loss +0.000277,
+  2 dari 4 fold membaik, delta RPS -0.000031  -> TIDAK signifikan
+```
+
+**HFA antar musim memang berbeda nyata, tapi tidak layak diimplementasikan:**
+
+1. Varian B (HFA khusus no-fans) **tidak punya jalur validasi sama sekali.**
+   Season 2020/21 jadi validation hanya di fold 1, tapi season itu sendiri
+   baru masuk training di fold 2. Jadi satu-satunya fold yang bisa menguji
+   varian no-fans justru tidak punya musim no-fans di training. Selama tidak
+   ada musim no-fans kedua, ini mustahil diuji out-of-sample.
+2. Test season juga tidak bisa mengujinya, karena 2025/26 bukan musim no-fans.
+   Sama seperti §5.5.
+3. Yang bisa diuji lintas fold cuma varian A, dan hasilnya tidak significant.
+
+Jalankan `python src/seasonal_hfa.py` untuk angkanya. Modul ini murni laporan:
+tidak menulis model produksi dan tidak menyentuh `evaluate.py`.
+
+### 5.8 Yang TIDAK berhasil dan tidak dicoba lagi
 - Eksclude musim 2020/21 dari training (membuang data, tidak sesuai scope)
 - Menambah fitur wasit sebagai kategorikal langsung (Poisson penaltyblog hanya support
   param per-tim + home advantage, bukan kategorikal)
+- HFA terpisah per musim untuk musim no-fans (lihat §5.7)
 
 ---
 
@@ -282,11 +313,16 @@ bukti kuat:
 > Kalau bukti di musim berikutnya tetap slim, kembalikan `XGBOOST_TUNED_PARAMS` di
 > `config.py` ke nilai lama (`n_estimators=300, learning_rate=0.03, max_depth=3`).
 
-### 7.5 Track A perlu perlakuan khusus untuk musim 2020/21
+### 7.5 Track A perlu perlakuan khusus untuk musim 2020/21 - SUDAH DIUJI, TIDAK DIJADIKAN FITUR
 Time-decay menyiske musim ini ke 3.6% bobot - efeknya ter-diskon tapi BELUM dihilangkan.
-Poisson/Dixon-Coles punya SATU parameter home_advantage global, jadi tidak bisa
-merepresentasikan musim tanpa penonton. Rekomendasi (belum diimplementasikan):
-parameter HFA terpisah untuk 2020/21. Ini keputusan desain yang perlu didiskusikan dulu.
+Poisson/Dixon-Coles punya SATU parameter home_advantage global, jadi secara teori tidak
+bisa merepresentasikan musim tanpa penonton.
+
+Rekomendasi HFA terpisah sudah diimplementasikan dan diuji di `src/seasonal_hfa.py`.
+Hasilnya: **signifikan secara statistik tapi tidak implementable.** Detail dan
+batasan strukturalnya di §5.7. Intinya, tidak ada jalur validasi out-of-sample
+untuknya selama tidak ada musim no-fans kedua, dan varian yang bisa diuji justru
+tidak significant. Keputusan: **jangan dijadikan fitur produksi**, HFA global tetap.
 
 ---
 
@@ -472,21 +508,70 @@ milik sesi paralel, jadi tidak diubah.
    sampai angkanya direview user.
 4. **C4** — `src/seasonal_hfa.py`: eksperimen HFA terpisah untuk musim no-fans.
 
-### 13.2 Baseline test saat mulai
-`92 passed` (sebelum C2), `main` == `origin/main` saat mulai — tidak ada
-commit tertahan.
+### 13.2 Baseline test
+`92 passed` saat mulai sesi, `main` == `origin/main` — tidak ada commit tertahan.
+Setelah C1-C4: **`125 passed`**.
 
-### 13.3 Catatan penting untuk sesi berikutnya
+### 13.3 Hasil Track A walk-forward CV (`src/track_a_cv.py`)
+
+5 fold musiman, season validasi 2020-2021 s.d. 2024-2025, `TEST_SEASON` tidak
+pernah jadi fold. Angka out-of-sample per model (mean 5 fold):
+
+| model | log loss | RPS | accuracy |
+|---|---|---|---|
+| poisson | **1.103723** | 0.243066 | 0.4489 |
+| dixon_coles | 1.105310 | 0.243113 | 0.4479 |
+| elo | 1.106281 | **0.241574** | **0.4616** |
+
+Perbandingan paired per fold terhadap Poisson: Dixon-Coles `+0.001586` (1 dari 5
+fold membaik), Elo `+0.002557` (2 dari 5 fold). Dixon-Coles tidak memberi
+peningkatan bermakna di luar sampel — konsisten dengan `rho ~ -0.004` yang sudah
+dicatat sebagai limitation di `AGENTS.md`.
+
+> **Angka-angka ini TIDAK disambungkan ke `evaluate.py`.** `cv_model_selection.csv`
+> masih pakai angka in-sample Track A seperti sebelumnya, dan
+> `predict_match.py` selection goal-model masih membaca angka itu. Tersedia tapi
+> belum dipakai, supaya perubahannya tidak terjadi tanpa review.
+
+> **Catatan comparability:** Elo di `track_a_cv.py` sengaja tanpa cold-start
+> ClubElo (semua tim mulai dari 1500), supaya deterministik dan tidak memanggil
+> API luar yang bisa rate-limit. Jadi **angka Elo di sana tidak langsung
+> sebanding** dengan Elo produksi yang memakai ClubElo.
+
+### 13.4 Hasil eksperimen HFA no-fans (`src/seasonal_hfa.py`)
+
+Detail lengkap di §5.7. Ringkasnya: selisih HFA antar musim **signifikan**
+(-0.1407, CI [-0.2849, -0.0723]) tapi tidak implementable karena tidak ada jalur
+validasi out-of-sample. **HFA global tetap dipakai di produksi.**
+
+### 13.5 File baru hasil C3/C4
+
+| File | Isi |
+|---|---|
+| `src/track_a_cv.py` | Walk-forward CV Track A |
+| `src/seasonal_hfa.py` | Eksperimen HFA no-fans |
+| `tests/test_track_a_cv.py` | 16 test |
+| `tests/test_evaluate_config_constants.py` | 6 test (guard hardcoded constants) |
+| `tests/test_seasonal_hfa.py` | 11 test |
+
+Artefak output di `data/processed/`: `track_a_cv_{results,summary,comparison}.csv`,
+`seasonal_hfa_{comparison,estimates,fold_details}.csv`. Metadata JSON di
+`data/metadata/{track_a_cv,seasonal_hfa}_summary.json`.
+
+Kedua modul diverifikasi **deterministik** (dua run berturut-turut menghasilkan
+CSV identik) dan terbukti **tidak menyentuh** `cv_model_selection.csv`.
+
+### 13.6 Catatan penting untuk sesi berikutnya
 - **Topik terbuka xG belum selesai.** Sumber data belum dipilih user. Semua
   opsi berlisensi (OpenFootAPI / API-Football / TheStatsAPI) masih menunggu.
   Jangan scraping apa pun untuk ini sebelum user memutuskan.
 - Angka Track A di `cv_model_selection.csv` **masih in-sample** sampai user
   memutuskan apakah `evaluate.py` boleh diubah memakai angka walk-forward CV
-  dari `track_a_cv.py`.
-- Tonggolan HFA 2020/21 (§5.5 `is_empty_stadium`) punya **keterbatasan
-  struktural yang sama**: `2025-2026` bukan musim no-fans, jadi fitur musiman
-  apa pun untuk 2020/21 mustahil diuji di test season. Hanya bisa dinilai
-  lewat CV di training.
+  dari `track_a_cv.py`. Kalau diputuskan, perhatikan konsekuensinya:
+  `dixon_coles` vs `poisson` saat ini menang 0.0000018 di angka in-sample, dan
+  di CV Poisson justru lebih baik. Winner goal-model kemungkinan flip.
+- **Jangan mengulang HFA terpisah per musim** (§5.7). Sudah diuji dan tidak ada
+  jalur validasinya.
 
 ---
 

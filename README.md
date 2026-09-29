@@ -29,6 +29,8 @@ Scope dan keputusan teknis lengkap (termasuk alasan di balik setiap pilihan meto
   - [Fase 17: Audit Menyeluruh](#fase-17-audit-menyeluruh)
   - [Fase 18: Koreksi Output Probability (Eksperimen)](#fase-18-koreksi-output-probability-eksperimen)
   - [Fase 19: Hyperparameter Tuning (Eksperimen)](#fase-19-hyperparameter-tuning-eksperimen)
+  - [Eksperimen Track A: Walk-Forward CV](#eksperimen-track-a-walk-forward-cv)
+  - [Eksperimen Seasonal HFA](#eksperimen-seasonal-hfa)
 - [Keterbatasan & Disclaimer](#keterbatasan--disclaimer)
 - [Kredit & Sumber Data](#kredit--sumber-data)
 
@@ -57,6 +59,8 @@ football-predictive-analysis/
 │   ├── value_betting.py        # Fase 8
 │   ├── model_calibration.py    # Fase 18 (eksperimen — hasil negatif)
 │   ├── model_tuning.py         # Fase 19 (eksperimen)
+│   ├── track_a_cv.py           # eksperimen walk-forward CV Track A
+│   ├── seasonal_hfa.py         # eksperimen HFA musim no-fans (hasil negatif)
 │   ├── predict_match.py        # Fase 9, 12, 15
 │   ├── player_stats.py         # Fase 10 — statistik musiman pemain
 │   ├── corner_model.py         # Fase 11 — model corner
@@ -388,6 +392,56 @@ dengan 95% CI [-0.000327, +0.000874] -> tidak signifikan.
 
 > **Hasil negatif — jangan diulang.** Detail lengkap di
 > [`HANDOFF.md`](./HANDOFF.md) bagian 5.
+
+### Eksperimen Track A: Walk-Forward CV
+
+```powershell
+python src/track_a_cv.py
+```
+
+Menghitung metrik **out-of-sample** untuk Track A (Poisson, Dixon-Coles, Elo)
+lewat walk-forward musiman: 5 fold expanding-window dengan season validasi
+2020-2021 s.d. 2024-2025. `TEST_SEASON` tidak pernah dipakai sebagai fold.
+
+Alasan modul ini ada: angka Track A di `cv_model_selection.csv` dihitung
+**in-sample** (model dievaluasi di data yang sama dengan data latihnya),
+sedangkan angka Track B di tabel yang sama berasal dari TimeSeriesSplit
+out-of-fold. Modul ini menghasilkan angka yang benar-benar sebanding.
+
+```text
+model          LogLoss       RPS      Acc
+poisson       1.103723  0.243066  0.4489
+dixon_coles   1.105310  0.243113  0.4479
+elo           1.106281  0.241574  0.4616
+```
+
+Dixon-Coles tidak memberi peningkatan bermakna di luar sampel (paired per
+fold: `+0.001586` log loss, hanya 1 dari 5 fold membaik) — konsisten dengan
+`rho ~ -0.004` yang sudah dicatat sebagai limitation.
+
+> **Status: belum disambungkan.** Angka di sini sengaja **tidak** dipakai
+> `evaluate.py` atau `predict_match.py` — `cv_model_selection.csv` masih
+> memakai angka in-sample Track A seperti sebelumnya, sampai angka ini
+> direview. Menyambungkannya bisa mengubah goal-model yang dipilih CLI.
+>
+> Catatan: Elo di modul ini tanpa cold-start ClubElo (semua tim mulai dari
+> 1500) supaya deterministik dan tidak memanggil API luar yang bisa rate-limit.
+> Jadi angka Elo di sini tidak langsung sebanding dengan Elo produksi.
+
+### Eksperimen Seasonal HFA
+
+```powershell
+python src/seasonal_hfa.py
+```
+
+Menguji apakah musim 2020/2021 (tanpa penonton) butuh parameter
+`home_advantage` sendiri. Hasilnya: HFA antar musim memang **berbeda
+signifikan** (selisih -0.1407, bootstrap 95% CI [-0.2849, -0.0723]), tapi
+**tidak layak diimplementasikan** — tidak ada jalur validasi out-of-sample
+yang bisa mengujinya, dan varian yang bisa diuji justru tidak significant.
+
+> **Hasil negatif.** HFA global tetap dipakai di produksi. Detail di
+> [`HANDOFF.md`](./HANDOFF.md) bagian 5.7.
 
 ## Keterbatasan & Disclaimer
 
