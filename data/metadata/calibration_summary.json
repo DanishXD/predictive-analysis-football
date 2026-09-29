@@ -1,0 +1,47 @@
+{
+  "purpose": "Eksperimen koreksi output probability. Model produksi tidak diubah.",
+  "base_model": "random_forest",
+  "test_season": "2025-2026",
+  "n_train": 3420,
+  "n_test": 380,
+  "oof_rows_covered": 2783,
+  "selected_draw_prior_factor": 1.0,
+  "raw_test": {
+    "rps": 0.21142088236143514,
+    "log_loss": 1.0376015548720172,
+    "accuracy": 0.47368421052631576,
+    "draw_recall": 0.0,
+    "draw_predictions": 2,
+    "mean_ece": 0.04082407371311414,
+    "mean_pred_draw": 0.23116030067136856
+  },
+  "verdict": [
+    {
+      "variant": "sigmoid",
+      "rps": 0.21396643708908372,
+      "delta_rps": 0.0025455547276485857,
+      "delta_log_loss": 0.007222585544572446,
+      "draw_recall": 0.0,
+      "delta_draw_recall": 0.0,
+      "better_rps": false
+    },
+    {
+      "variant": "isotonic",
+      "rps": 0.21527305703337482,
+      "delta_rps": 0.0038521746719396843,
+      "delta_log_loss": 0.012613014896053931,
+      "draw_recall": 0.0,
+      "delta_draw_recall": 0.0,
+      "better_rps": false
+    },
+    {
+      "variant": "raw_draw_prior",
+      "rps": 0.21142088236143514,
+      "delta_rps": 0.0,
+      "delta_log_loss": 0.0,
+      "draw_recall": 0.0,
+      "delta_draw_recall": 0.0,
+      "better_rps": false
+    }
+  ]
+}
