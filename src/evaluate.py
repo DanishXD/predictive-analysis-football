@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import penaltyblog as pb
 import seaborn as sns
+import config
 from config import (
     BOOTSTRAP_SAMPLES,
     MODELS_DIR,
@@ -125,6 +126,19 @@ def decode_bookmaker_odds(matches: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _new_elo():
+    """Buat objek Elo dengan parameter yang dibaca dari ``config`` saat dipanggil.
+
+    Nilai diambil lewat ``config.X`` (bukan ``from config import X``) supaya
+    monkeypatch di test benar-benar mengubah perilaku. Guard AST di
+    ``tests/test_config.py`` hanya menangkap assignment module-level, jadi
+    keyword argument yang ditulis literal sebelumnya lolos dari sana.
+    """
+    return pb.ratings.Elo(
+        k=config.ELO_K, home_field_advantage=config.ELO_HOME_ADVANTAGE
+    )
+
+
 def build_elo_probabilities(base: pd.DataFrame) -> pd.DataFrame:
     """Recreate 1X2 Elo probabilities from the saved pre-match ratings."""
     elo_history = pd.read_csv(ELO_PATH)
@@ -148,7 +162,7 @@ def build_elo_probabilities(base: pd.DataFrame) -> pd.DataFrame:
 
     rows = []
     for match in merged.itertuples(index=False):
-        elo = pb.ratings.Elo(k=20.0, home_field_advantage=100.0)
+        elo = _new_elo()
         elo.ratings = {
             match.team_home: float(match.elo_pre),
             match.team_away: float(match.opponent_elo_pre),
@@ -833,14 +847,16 @@ def _score_grid_probabilities(model, train: pd.DataFrame) -> np.ndarray:
     """Konversi score grid 1X2 tiap match training menjadi vektor probabilitas."""
     rows = []
     for match in train.itertuples(index=False):
-        grid = model.predict(match.team_home, match.team_away, max_goals=15)
+        grid = model.predict(
+            match.team_home, match.team_away, max_goals=config.MAX_GOALS
+        )
         home, draw, away = grid.home_draw_away
         rows.append([float(home), float(draw), float(away)])
     return np.array(rows)
 
 
 def _elo_row_probabilities(row) -> list[float]:
-    elo = pb.ratings.Elo(k=20.0, home_field_advantage=100.0)
+    elo = _new_elo()
     elo.ratings = {
         row["team"]: float(row["elo_pre"]),
         row["opponent"]: float(row["opponent_elo_pre"]),
