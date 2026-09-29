@@ -398,6 +398,98 @@ Semua dari root project dengan interpreter venv:
 
 ---
 
+## 14. Ringkasan temuan audit (29 September 2026)
+
+Empat temuan dari pembacaan kode + artefak pada sesi ini. Hanya satu yang
+menyentuh `src/`, sudah diperbaiki di commit terpisah.
+
+### 14.1 Hardcoded constants di `evaluate.py` (SUDAH DIPERBAIKI)
+Tiga nilai ditulis langsung, bukan import dari `config.py`:
+
+| Lokasi | Nilai lama | Constant yang benar |
+|---|---|---|
+| `evaluate.py:151` | `k=20.0` | `ELO_K` |
+| `evaluate.py:843` | `k=20.0` | `ELO_K` |
+| `evaluate.py:151,843` | `home_field_advantage=100.0` | `ELO_HOME_ADVANTAGE` |
+| `evaluate.py:836` | `max_goals=15` | `MAX_GOALS` |
+
+Guard AST di `tests/test_config.py` **tidak menangkap ini** karena dia hanya
+mencari assignment module-level, sedangkan ketiga nilai ini muncul sebagai
+keyword argument di dalam fungsi. Konsekuensinya kalau tidak diperbaiki:
+mengubah `ELO_K` atau `MAX_GOALS` di `config.py` membuat
+`statistical_models.py` dan `evaluate.py` memakai skala berbeda tanpa error —
+metrik jadi tidak apples-to-apple dan perbandingan model diam-diam tidak
+valid. Regression test baru mengunci kebocoran ini lewat monkeypatch.
+
+### 14.2 Angka Track A di `cv_model_selection.csv` itu in-sample
+`evaluate._track_a_selection_metrics()` me-load model yang **di-fit di data
+training**, lalu menilainya di **data training yang sama**. Angka Track B di
+tabel yang sama berasal dari TimeSeriesSplit out-of-fold. Jadi kolom
+`cv_log_loss_mean` mencampur dua basis yang berbeda.
+
+Label `selection_basis` sudah jujur soal ini
+(`"train-only single split (no CV)"`), jadi tidak ada klaim palsu. Dampaknya
+belum merusak pemilihan model: kandidat goal-model semuanya Track A dan
+kandidat klasifikasi semuanya Track B, jadi perbandingan lintas track tidak
+pernah terjadi di `select_best_model`. Namun tabel ini menyesatkan kalau dibaca
+sebagai "CV ranking" tunggal.
+
+Perbaikannya butuh walk-forward CV untuk Track A — sekarang sudah ada di
+`src/track_a_cv.py` (lihat §13).
+
+### 14.3 `README.md` salah menulis rentang training
+Tercantum "2021-2025 train" untuk corner model. Sebenarnya training period
+adalah **2016-2017 s.d. 2024-2025** (9 musim, 3.420 match) dan test season
+2025-2026 (380 match), sama seperti Phase 4. Sudah dikoreksi.
+
+### 14.4 Angka `research/evaluations/baseline.md` berbeda dari sekarang
+Tabel di `research/evaluations/baseline.md` (capture 2026-09-21) tidak cocok
+dengan `data/processed/evaluation_summary.csv` sekarang:
+
+| model | baseline (21 Sep) | sekarang | penjelasan |
+|---|---|---|---|
+| Random Forest | 1.036 | 1.037602 | refit, angka stabil |
+| XGBoost | 1.056 | 1.045309 | `XGBOOST_TUNED_PARAMS` (commit 34876d0) |
+| Elo | 1.083 | 1.075032 | ClubElo rescaling (commit 2c4cc61) |
+| RF ECE | 0.050 | 0.040824 | definisi ECE one-vs-rest sudah diseragamkan |
+
+**Ini bukan error** — `baseline.md` memang sengaja capture kondisi *pre-upgrade*
+sebelum commit Phase 19 dan ClubElo rescale, jadi perbedaan angka memang
+diharapkan. Dicatat supaya tidak salah dibaca sebagai regresi. File tersebut
+milik sesi paralel, jadi tidak diubah.
+
+---
+
+## 13. Sesi 29 September 2026 (sesi setelah HANDOFF.md pertama)
+
+### 13.1 Yang dikerjakan
+1. **C1** — Sinkronisasi `README.md` (Fase 18/19, koreksi rentang training,
+   konfirmasi model selection berbasis CV).
+2. **C2** — Hardcoded constants di `evaluate.py` diganti import dari `config.py`
+   + regression test baru (§14.1).
+3. **C3** — `src/track_a_cv.py`: walk-forward CV untuk Track A, hasil ditulis ke
+   file terpisah. **`evaluate.py` dan `predict_match.py` sengaja TIDAK diubah**
+   sampai angkanya direview user.
+4. **C4** — `src/seasonal_hfa.py`: eksperimen HFA terpisah untuk musim no-fans.
+
+### 13.2 Baseline test saat mulai
+`92 passed` (sebelum C2), `main` == `origin/main` saat mulai — tidak ada
+commit tertahan.
+
+### 13.3 Catatan penting untuk sesi berikutnya
+- **Topik terbuka xG belum selesai.** Sumber data belum dipilih user. Semua
+  opsi berlisensi (OpenFootAPI / API-Football / TheStatsAPI) masih menunggu.
+  Jangan scraping apa pun untuk ini sebelum user memutuskan.
+- Angka Track A di `cv_model_selection.csv` **masih in-sample** sampai user
+  memutuskan apakah `evaluate.py` boleh diubah memakai angka walk-forward CV
+  dari `track_a_cv.py`.
+- Tonggolan HFA 2020/21 (§5.5 `is_empty_stadium`) punya **keterbatasan
+  struktural yang sama**: `2025-2026` bukan musim no-fans, jadi fitur musiman
+  apa pun untuk 2020/21 mustahil diuji di test season. Hanya bisa dinilai
+  lewat CV di training.
+
+---
+
 ## 12. Aturan keras project (dari AGENTS.md)
 
 1. **Anti-leakage**: fitur match T hanya boleh memakai data sebelum T. Split waktu:

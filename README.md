@@ -27,6 +27,8 @@ Scope dan keputusan teknis lengkap (termasuk alasan di balik setiap pilihan meto
   - [Fase 14: Team Discipline Model](#fase-14-team-discipline-model)
   - [Fase 16: Report/Dashboard (Opsional)](#fase-16-reportdashboard-opsional)
   - [Fase 17: Audit Menyeluruh](#fase-17-audit-menyeluruh)
+  - [Fase 18: Koreksi Output Probability (Eksperimen)](#fase-18-koreksi-output-probability-eksperimen)
+  - [Fase 19: Hyperparameter Tuning (Eksperimen)](#fase-19-hyperparameter-tuning-eksperimen)
 - [Keterbatasan & Disclaimer](#keterbatasan--disclaimer)
 - [Kredit & Sumber Data](#kredit--sumber-data)
 
@@ -53,6 +55,8 @@ football-predictive-analysis/
 │   ├── train_model.py          # Fase 5 — Track B: ML classifiers
 │   ├── evaluate.py             # Fase 7
 │   ├── value_betting.py        # Fase 8
+│   ├── model_calibration.py    # Fase 18 (eksperimen — hasil negatif)
+│   ├── model_tuning.py         # Fase 19 (eksperimen)
 │   ├── predict_match.py        # Fase 9, 12, 15
 │   ├── player_stats.py         # Fase 10 — statistik musiman pemain
 │   ├── corner_model.py         # Fase 11 — model corner
@@ -208,10 +212,17 @@ python src/predict_match.py
 Script menampilkan semua tim yang pernah muncul dalam dataset. Tim bisa dipilih
 dengan mengetik nomor atau nama lengkapnya, lalu user menentukan tim kandang.
 
-Pemilihan model tidak di-hardcode: script membaca `evaluation_summary.csv`, memilih
-RPS terendah (dengan log loss sebagai tie-breaker) antara Poisson/Dixon-Coles untuk
-top-3 skor, dan antara Logistic Regression/Random Forest/XGBoost untuk peluang
-Home Win/Draw/Away Win. Nama model beserta metrik Fase 7 selalu ditampilkan.
+Pemilihan model **tidak di-hardcode dan tidak memakai test metrics**. Script
+membaca `cv_model_selection.csv` (metrik berbasis data training), lalu memilih
+`cv_log_loss_mean` terendah — dengan `cv_accuracy_mean` tertinggi sebagai
+tie-breaker, lalu nama model secara deterministik — antara Poisson/Dixon-Coles
+untuk top-3 skor, dan antara Logistic Regression/Random Forest/XGBoost untuk
+peluang Home Win/Draw/Away Win.
+
+`evaluation_summary.csv` (metrik test season) tetap ada sebagai artefak
+pelaporan akhir, tetapi **tidak boleh dipakai memilih model** — memakainya
+untuk selection adalah kontaminasi test set. Nama model beserta metrik yang
+dipakai selalu ditampilkan di output.
 
 Karena fixture bersifat hipotetis dan tidak meminta tanggal, script memakai waktu
 saat dijalankan sebagai tanggal prediksi, tetapi tidak pernah memakai tanggal
@@ -266,8 +277,8 @@ python src/corner_model.py
 
 Fits a Poisson model for corner counts (HC/AC) with the same architecture as the
 goal model: each team gets corner-attack and corner-defense parameters + home
-advantage. Same train/test split as Phase 4 (2021-2025 train, 2025-26 test) with
-time-decay weights. Output:
+advantage. Same train/test split as Phase 4 (2016-2017 through 2024-2025 train,
+2025-2026 test) with time-decay weights. Output:
 
 - `corner_team_strengths.csv` — corner-attack/defense per team
 - `corner_test_predictions.csv` — expected corners + over/under probabilities per match
@@ -327,6 +338,56 @@ training/test konsisten antara Track A & B, pemilihan model di Fase 9/12/15
 otomatis (bukan hardcode), serta seluruh disclaimer dan label model tampil
 dengan benar. Prompt audit lengkap tersedia di
 `prompt-agent-predictive-analysis-bola.md` (Prompt 17).
+
+### Fase 18: Koreksi Output Probability (Eksperimen)
+
+```powershell
+python src/model_calibration.py
+```
+
+Menguji dua teknik koreksi output probability pada model Random Forest:
+post-hoc calibration (sigmoid/Platt dan isotonic) serta penyesuaian
+draw-prior (P(draw) x lambda). Metrik dihitung **out-of-fold di data training**,
+bukan di test season, supaya tidak ada kontaminasi test set.
+
+lambda draw-prior dicari dengan minimasi RPS di CV training. Hasilnya
+**lambda = 1.0, artinya tidak ada penyesuaian yang membantu** — kurva RPS
+monoton memburuk seiring naiknya lambda. Kedua metode calibration justru
+memperbaiki ECE out-of-fold (0.021557 -> 0.016833) tapi **memperbaiki keyakinan
+sambil merusak urutan probabilitas**, dan RPS hanya peduli urutan.
+
+> **Hasil negatif — jangan diulang.** Detail lengkap di
+> [`HANDOFF.md`](./HANDOFF.md) bagian 5.
+
+### Fase 19: Hyperparameter Tuning (Eksperimen)
+
+```powershell
+python src/model_tuning.py
+```
+
+`GridSearchCV` dengan `DateTimeSeriesSplit` (adapter date-based, forward-only)
+dan objective RPS. Random Forest dan XGBoost masing-masing diberi grid kecil
+supaya biaya komputasi tetap wajar.
+
+Hasil XGBoost (`learning_rate=0.02`, `max_depth=2`, `n_estimators=200`) kini
+dipakai di `train_model.build_models()` dan tersimpan di
+`config.XGBOOST_TUNED_PARAMS`.
+
+> **Penting — pilihan ini belum meyakinkan.** XGBoost menang tipis di CV log loss
+> (0.980369 vs 0.982640 untuk Random Forest) tetapi selisihnya **tidak
+> signifikan**: t-test 5 fold menghasilkan p=0.28 dan hanya 3 dari 5 fold
+> menguntungkan XGBoost. Di test season 2025-26 Random Forest justru lebih baik
+> pada RPS (0.211421 vs 0.213533) dan log loss (1.037602 vs 1.045309). XGBoost
+> dipilih karena **aturan main project ini** (selection berbasis CV, bukan test
+> set), bukan karena bukti kuat. Kalau bukti di musim berikutnya tetap slim,
+> kembalikan `XGBOOST_TUNED_PARAMS` di `config.py` ke nilai lama
+> (`n_estimators=300`, `learning_rate=0.03`, `max_depth=3`).
+
+Tuning Random Forest sendiri nyaris tidak bergerak: delta RPS hanya +0.000271
+dengan 95% CI [-0.000327, +0.000874] -> tidak signifikan.
+
+> **Hasil negatif — jangan diulang.** Detail lengkap di
+> [`HANDOFF.md`](./HANDOFF.md) bagian 5.
 
 ## Keterbatasan & Disclaimer
 
