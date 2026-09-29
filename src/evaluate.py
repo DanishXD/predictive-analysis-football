@@ -7,7 +7,15 @@ import numpy as np
 import pandas as pd
 import penaltyblog as pb
 import seaborn as sns
-from config import MODELS_DIR, PROCESSED_DIR, PROJECT_ROOT, TARGET_MAPPING, TEST_SEASON
+from config import (
+    BOOTSTRAP_SAMPLES,
+    MODELS_DIR,
+    N_SPLITS,
+    PROCESSED_DIR,
+    PROJECT_ROOT,
+    TARGET_MAPPING,
+    TEST_SEASON,
+)
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import (
     accuracy_score,
@@ -23,12 +31,23 @@ STATISTICAL_PATH = PROCESSED_DIR / "test_match_probabilities.csv"
 ELO_PATH = PROCESSED_DIR / "elo_history.csv"
 ML_PATH = PROCESSED_DIR / "ml_test_predictions.csv"
 STACKING_PATH = PROCESSED_DIR / "stacking_test_predictions.csv"
+ML_METRICS_PATH = PROCESSED_DIR / "ml_model_metrics.csv"
+STATISTICAL_METRICS_PATH = PROCESSED_DIR / "statistical_model_metrics.csv"
+POISSON_MODEL_PATH = MODELS_DIR / "poisson_goal_model.pkl"
+DIXON_COLES_MODEL_PATH = MODELS_DIR / "dixon_coles_goal_model.pkl"
+
+# Tabel model selection. Berisi metrik LATIHAN (bukan test) supaya pemilihan
+# model tidak tercemar performa test set. predict_match.py membaca file ini.
+CV_SELECTION_PATH = PROCESSED_DIR / "cv_model_selection.csv"
 
 SUMMARY_PATH = PROCESSED_DIR / "evaluation_summary.csv"
 CLASS_METRICS_PATH = PROCESSED_DIR / "evaluation_class_metrics.csv"
 CONFUSION_PATH = PROCESSED_DIR / "evaluation_confusion_matrices.csv"
 PREDICTIONS_PATH = PROCESSED_DIR / "evaluation_predictions.csv"
 BOOKMAKER_PATH = PROCESSED_DIR / "bookmaker_probabilities.csv"
+# Bootstrap CI outputs — file baru, tidak menggantikan SUMMARY_PATH
+CI_SUMMARY_PATH = PROCESSED_DIR / "evaluation_summary_with_ci.csv"
+COMPARISON_PATH = PROCESSED_DIR / "model_comparison_bootstrap.csv"
 
 CLASS_CODES = ["H", "D", "A"]
 CLASS_NAMES = ["Home Win", "Draw", "Away Win"]
@@ -267,6 +286,190 @@ def expected_calibration_error(
                 )
         class_errors.append(class_error)
     return float(np.mean(class_errors))
+
+
+def _rps_score(probabilities: np.ndarray, y_true: np.ndarray) -> float:
+    """Wrapper RPS untuk dipakai dalam bootstrap."""
+    import penaltyblog as pb
+    return pb.metrics.rps_average(probabilities, y_true)
+
+
+def _brier_score(probabilities: np.ndarray, y_true: np.ndarray) -> float:
+    """Wrapper Brier untuk dipakai dalam bootstrap."""
+    import penaltyblog as pb
+    return pb.metrics.multiclass_brier_score(probabilities, y_true)
+
+
+def bootstrap_metric_ci(
+    probabilities: np.ndarray,
+    y_true: np.ndarray,
+    n_samples: int = BOOTSTRAP_SAMPLES,
+    confidence: float = 0.95,
+    random_state: int = 42,
+) -> dict[str, dict[str, float]]:
+    """Hitung bootstrap 95% CI untuk RPS, log_loss, accuracy, dan brier.
+
+    Resample dilakukan pada level match (bukan observation) — paired bootstrap
+    sehingga setiap baris prediksi + label tetap pasangan yang sama.
+
+    Returns dict: {metric_name: {"mean": ..., "ci_low": ..., "ci_high": ...}}
+    """
+    rng = np.random.default_rng(random_state)
+    n = len(y_true)
+    alpha = 1.0 - confidence
+
+    boot_rps = np.empty(n_samples)
+    boot_ll = np.empty(n_samples)
+    boot_acc = np.empty(n_samples)
+    boot_brier = np.empty(n_samples)
+
+    for i in range(n_samples):
+        idx = rng.integers(0, n, size=n)
+        p_boot = probabilities[idx]
+        y_boot = y_true[idx]
+        # normalize agar sum tetap 1 setelah resampling (seharusnya sudah, tapi jaga-jaga)
+        p_boot = p_boot / p_boot.sum(axis=1, keepdims=True)
+        boot_rps[i] = _rps_score(p_boot, y_boot)
+        boot_ll[i] = log_loss(y_boot, p_boot, labels=[0, 1, 2])
+        boot_acc[i] = accuracy_score(y_boot, p_boot.argmax(axis=1))
+        boot_brier[i] = _brier_score(p_boot, y_boot)
+
+    def _ci(arr: np.ndarray) -> dict[str, float]:
+        return {
+            "mean": float(arr.mean()),
+            "ci_low": float(np.percentile(arr, 100 * alpha / 2)),
+            "ci_high": float(np.percentile(arr, 100 * (1 - alpha / 2))),
+        }
+
+    return {
+        "rps": _ci(boot_rps),
+        "log_loss": _ci(boot_ll),
+        "accuracy": _ci(boot_acc),
+        "brier_score": _ci(boot_brier),
+    }
+
+
+def bootstrap_model_comparison(
+    predictions: pd.DataFrame,
+    model_a: str,
+    model_b: str,
+    n_samples: int = BOOTSTRAP_SAMPLES,
+    random_state: int = 42,
+) -> dict[str, float]:
+    """Paired bootstrap test: apakah model_a lebih baik dari model_b pada RPS?
+
+    Paired = resample match yang sama untuk kedua model secara bersamaan.
+    Mengembalikan:
+    - delta_rps_mean: mean(RPS_a - RPS_b) — negatif = model_a lebih baik
+    - p_value: fraksi bootstrap samples di mana model_a >= model_b (H0: tidak ada beda)
+    - ci_low, ci_high: 95% CI untuk delta RPS
+    """
+    import penaltyblog as pb
+
+    match_ids = predictions["match_id"].unique()
+    data_a = predictions.loc[predictions["model"] == model_a].set_index("match_id")
+    data_b = predictions.loc[predictions["model"] == model_b].set_index("match_id")
+
+    # Hanya match yang ada di kedua model
+    common = sorted(set(data_a.index) & set(data_b.index))
+    data_a = data_a.loc[common]
+    data_b = data_b.loc[common]
+
+    prob_a = data_a[["prob_home", "prob_draw", "prob_away"]].to_numpy()
+    prob_b = data_b[["prob_home", "prob_draw", "prob_away"]].to_numpy()
+    y_true = data_a["result"].map(TARGET_MAPPING).to_numpy()
+
+    n = len(common)
+    rng = np.random.default_rng(random_state)
+    boot_delta = np.empty(n_samples)
+
+    for i in range(n_samples):
+        idx = rng.integers(0, n, size=n)
+        rps_a = pb.metrics.rps_average(prob_a[idx], y_true[idx])
+        rps_b = pb.metrics.rps_average(prob_b[idx], y_true[idx])
+        boot_delta[i] = rps_a - rps_b
+
+    # Observed delta
+    obs_delta = _rps_score(prob_a, y_true) - _rps_score(prob_b, y_true)
+    # p-value: fraksi bootstrap delta >= 0 (H0: model_a tidak lebih baik)
+    p_value = float((boot_delta >= 0).mean())
+
+    return {
+        "model_a": model_a,
+        "model_b": model_b,
+        "obs_rps_a": float(_rps_score(prob_a, y_true)),
+        "obs_rps_b": float(_rps_score(prob_b, y_true)),
+        "delta_rps_mean": float(boot_delta.mean()),
+        "delta_rps_ci_low": float(np.percentile(boot_delta, 2.5)),
+        "delta_rps_ci_high": float(np.percentile(boot_delta, 97.5)),
+        "p_value_a_not_better": p_value,
+        "significant_95": bool(p_value < 0.05),
+        "n_matches": n,
+        "n_bootstrap": n_samples,
+    }
+
+
+def run_bootstrap_evaluation(
+    predictions: pd.DataFrame,
+    summary: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Generate CI summary dan pairwise model comparison.
+
+    Mengembalikan (ci_summary_df, comparison_df).
+    ci_summary_df: summary + kolom CI tambahan
+    comparison_df: pairwise bootstrap comparison
+    """
+    print(f"\nMenghitung bootstrap CIs ({BOOTSTRAP_SAMPLES} samples)...")
+    ci_rows = []
+    available_models = [m for m in MODEL_ORDER if m in summary["model"].values]
+
+    for model in available_models:
+        model_data = predictions.loc[predictions["model"] == model]
+        y_true = model_data["result"].map(TARGET_MAPPING).to_numpy()
+        probs = model_data[["prob_home", "prob_draw", "prob_away"]].to_numpy()
+
+        print(f"  Bootstrap: {model}...", end=" ", flush=True)
+        cis = bootstrap_metric_ci(probs, y_true)
+        print("selesai")
+
+        base_row = summary.loc[summary["model"] == model].iloc[0].to_dict()
+        for metric, stats in cis.items():
+            base_row[f"{metric}_ci_low"] = stats["ci_low"]
+            base_row[f"{metric}_ci_high"] = stats["ci_high"]
+        ci_rows.append(base_row)
+
+    ci_summary = pd.DataFrame(ci_rows)
+
+    # Pairwise comparison: semua Track B models vs bookmaker, dan antar sesama
+    print("\nMenghitung paired bootstrap comparison...")
+    comp_pairs = []
+    track_b_models = ["logistic_regression", "random_forest", "xgboost"]
+    actual_models = [m for m in track_b_models if m in summary["model"].values]
+
+    # Setiap model vs bookmaker
+    for model in actual_models:
+        if "bookmaker_avg_odds" in summary["model"].values:
+            result = bootstrap_model_comparison(predictions, model, "bookmaker_avg_odds")
+            comp_pairs.append(result)
+            print(
+                f"  {model} vs bookmaker: delta={result['delta_rps_mean']:+.4f} "
+                f"p={result['p_value_a_not_better']:.3f} "
+                f"({'signifikan' if result['significant_95'] else 'tidak signifikan'})"
+            )
+
+    # RF vs LR vs XGB pairwise
+    for i, m_a in enumerate(actual_models):
+        for m_b in actual_models[i + 1:]:
+            result = bootstrap_model_comparison(predictions, m_a, m_b)
+            comp_pairs.append(result)
+            print(
+                f"  {m_a} vs {m_b}: delta={result['delta_rps_mean']:+.4f} "
+                f"p={result['p_value_a_not_better']:.3f} "
+                f"({'signifikan' if result['significant_95'] else 'tidak signifikan'})"
+            )
+
+    comparison = pd.DataFrame(comp_pairs)
+    return ci_summary, comparison
 
 
 def evaluate_predictions(
@@ -529,6 +732,163 @@ def check_training_consistency() -> None:
         print(f"  Period: {sample['period'][0]} to {sample['period'][1]} ({sample['matches']} matches)\n")
 
 
+def _train_rows() -> pd.DataFrame:
+    """Baris training (semua season selain TEST_SEASON) untuk metrik Track A."""
+    columns = ["match_id", "season", "datetime", "date", "team_home", "team_away", "result"]
+    matches = pd.read_csv(MATCHES_PATH, usecols=columns, parse_dates=["datetime", "date"])
+    return matches.loc[matches["season"] != TEST_SEASON].sort_values(
+        ["datetime", "match_id"]
+    ).reset_index(drop=True)
+
+
+def _log_loss_and_accuracy(
+    probabilities: np.ndarray, y_true: np.ndarray
+) -> tuple[float, float]:
+    return (
+        float(log_loss(y_true, probabilities, labels=[0, 1, 2])),
+        float(accuracy_score(y_true, probabilities.argmax(axis=1))),
+    )
+
+
+def _track_a_selection_metrics() -> pd.DataFrame:
+    """Hitung log loss & accuracy Track A pada data TRAINING saja.
+
+    Model Poisson/Dixon-Coles tidak punya cross-validation, jadi dipakai
+    single-split di atas data training. Test metrics sengaja tidak dipakai:
+    memakai test set untuk memilih model justru kontaminasi yang dihindari
+    dalam model selection. Label selection_basis menyatakan basisnya dengan jujur.
+    """
+    train = _train_rows()
+    y_true = train["result"].map(TARGET_MAPPING).to_numpy()
+    rows = []
+
+    goal_models = [
+        ("poisson", POISSON_MODEL_PATH, pb.models.PoissonGoalsModel),
+        ("dixon_coles", DIXON_COLES_MODEL_PATH, pb.models.DixonColesGoalModel),
+    ]
+    for name, path, model_class in goal_models:
+        if not path.exists():
+            rows.append(
+                {
+                    "model": name,
+                    "track": "Track A",
+                    "cv_log_loss_mean": np.nan,
+                    "cv_log_loss_std": np.nan,
+                    "cv_accuracy_mean": np.nan,
+                    "cv_accuracy_std": np.nan,
+                    "selection_basis": "tidak tersedia (model belum disimpan)",
+                    "draw_recall": np.nan,
+                }
+            )
+            continue
+        model = model_class.load(str(path))
+        probabilities = _score_grid_probabilities(model, train)
+        loss, accuracy = _log_loss_and_accuracy(probabilities, y_true)
+        rows.append(
+            {
+                "model": name,
+                "track": "Track A",
+                "cv_log_loss_mean": loss,
+                "cv_log_loss_std": np.nan,
+                "cv_accuracy_mean": accuracy,
+                "cv_accuracy_std": np.nan,
+                "selection_basis": "train-only single split (no CV)",
+                "draw_recall": np.nan,
+            }
+        )
+
+    # Elo: likewise train-only, rebuilt from the saved pre-match ratings.
+    elo_path = ELO_PATH
+    if elo_path.exists():
+        elo_history = pd.read_csv(elo_path)
+        train_seasons = sorted(train["season"].unique())
+        home_rows = elo_history.loc[
+            elo_history["season"].isin(train_seasons) & (elo_history["venue"] == "home"),
+            ["match_id", "team", "opponent", "elo_pre", "opponent_elo_pre"],
+        ].set_index("match_id")
+        if not home_rows.empty and home_rows.index.isin(set(train["match_id"])).all():
+            probabilities = np.array(
+                [
+                    _elo_row_probabilities(home_rows.loc[mid])
+                    for mid in train["match_id"]
+                ]
+            )
+            loss, accuracy = _log_loss_and_accuracy(probabilities, y_true)
+            rows.append(
+                {
+                    "model": "elo",
+                    "track": "Track A",
+                    "cv_log_loss_mean": loss,
+                    "cv_log_loss_std": np.nan,
+                    "cv_accuracy_mean": accuracy,
+                    "cv_accuracy_std": np.nan,
+                    "selection_basis": "train-only single split (no CV)",
+                    "draw_recall": np.nan,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _score_grid_probabilities(model, train: pd.DataFrame) -> np.ndarray:
+    """Konversi score grid 1X2 tiap match training menjadi vektor probabilitas."""
+    rows = []
+    for match in train.itertuples(index=False):
+        grid = model.predict(match.team_home, match.team_away, max_goals=15)
+        home, draw, away = grid.home_draw_away
+        rows.append([float(home), float(draw), float(away)])
+    return np.array(rows)
+
+
+def _elo_row_probabilities(row) -> list[float]:
+    elo = pb.ratings.Elo(k=20.0, home_field_advantage=100.0)
+    elo.ratings = {
+        row["team"]: float(row["elo_pre"]),
+        row["opponent"]: float(row["opponent_elo_pre"]),
+    }
+    probabilities = elo.calculate_match_probabilities(row["team"], row["opponent"])
+    return [
+        probabilities["home_win"],
+        probabilities["draw"],
+        probabilities["away_win"],
+    ]
+
+
+def export_cv_model_selection(draw_recall_by_model: dict[str, float]) -> pd.DataFrame:
+    """Tulis cv_model_selection.csv: metrik selection berbasis data training.
+
+    Track B memakai CV metrics asli dari Fase 5. Track A memakai single split
+    train-only karena modelnya tidak punya CV. Test metrics tidak ikut supaya
+    pemilihan model tidak tercemar test set. Dipanggil setiap run evaluate.py
+    supaya file ini tidak pernah basi.
+    """
+    rows = []
+
+    if ML_METRICS_PATH.exists():
+        ml_metrics = pd.read_csv(ML_METRICS_PATH)
+        for row in ml_metrics.itertuples(index=False):
+            rows.append(
+                {
+                    "model": row.model,
+                    "track": "Track B",
+                    "cv_log_loss_mean": row.cv_log_loss_mean,
+                    "cv_log_loss_std": row.cv_log_loss_std,
+                    "cv_accuracy_mean": row.cv_accuracy_mean,
+                    "cv_accuracy_std": row.cv_accuracy_std,
+                    "selection_basis": f"TimeSeriesSplit {N_SPLITS}-fold CV",
+                    "draw_recall": draw_recall_by_model.get(row.model, np.nan),
+                }
+            )
+    else:
+        print(f"PERINGATAN: {ML_METRICS_PATH.name} tidak ada, Track A saja")
+
+    for row in _track_a_selection_metrics().to_dict("records"):
+        rows.append(row)
+
+    table = pd.DataFrame(rows)
+    table.to_csv(CV_SELECTION_PATH, index=False)
+    return table
+
+
 def main() -> None:
     """Run the complete Phase 7 evaluation."""
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -551,6 +911,26 @@ def main() -> None:
     confusion.to_csv(CONFUSION_PATH, index=False)
     plot_calibration(predictions)
     plot_confusion_matrices(confusion)
+
+    # Bootstrap CIs — file terpisah, tidak menggantikan evaluation_summary.csv
+    ci_summary, comparison = run_bootstrap_evaluation(predictions, summary)
+    ci_summary.to_csv(CI_SUMMARY_PATH, index=False)
+    comparison.to_csv(COMPARISON_PATH, index=False)
+    print(f"\nBootstrap CI disimpan ke: {CI_SUMMARY_PATH}")
+    print(f"Model comparison disimpan ke: {COMPARISON_PATH}")
+
+    # Model selection table — ditulis tiap run supaya tidak pernah basi.
+    # draw_recall diambil dari summary (test metrics) karena hanya dipakai untuk
+    # peringatan di CLI, BUKAN untuk memilih model.
+    draw_recall_by_model = dict(
+        zip(summary["model"], summary["draw_recall"])
+    )
+    cv_table = export_cv_model_selection(draw_recall_by_model)
+    print(f"\nModel selection table disimpan ke: {CV_SELECTION_PATH}")
+    print(
+        cv_table[["model", "track", "cv_log_loss_mean", "cv_accuracy_mean", "selection_basis"]]
+        .to_string(index=False, float_format=lambda v: f"{v:.6f}")
+    )
 
     benchmark = summary.loc[summary["model"] == "bookmaker_avg_odds"].iloc[0]
     actual_models = summary.loc[summary["track"] != "Benchmark"]

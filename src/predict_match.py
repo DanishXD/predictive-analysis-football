@@ -31,7 +31,10 @@ from value_betting import build_ml_feature_rows
 
 
 MATCHES_PATH = PROCESSED_DIR / "matches_clean.csv"
-EVALUATION_PATH = PROCESSED_DIR / "evaluation_summary.csv"
+# cv_model_selection.csv berisi CV metrics (bukan test metrics) — dipakai untuk
+# model selection saja. evaluation_summary.csv (test metrics) tetap ada sebagai
+# artefak pelaporan final dan TIDAK boleh dipakai untuk memilih model.
+CV_SELECTION_PATH = PROCESSED_DIR / "cv_model_selection.csv"
 ELO_RATINGS_PATH = PROCESSED_DIR / "elo_current_ratings.csv"
 ML_MODEL_PATH = MODELS_DIR / "best_ml_model.pkl"
 ML_METADATA_PATH = MODELS_DIR / "best_ml_model_metadata.json"
@@ -62,14 +65,24 @@ def select_best_model(
     evaluation: pd.DataFrame,
     candidates: set[str],
 ) -> pd.Series:
-    """Select the lowest RPS, then lowest log loss, from allowed candidates."""
+    """Select model dengan cv_log_loss_mean terendah dari kandidat yang tersedia.
+
+    Menggunakan CV metrics (bukan test set) agar model selection tidak
+    terkontaminasi oleh performa test — test set hanya untuk pelaporan final.
+    Tie-breaker: cv_accuracy_mean tertinggi, lalu nama model (deterministik).
+    """
     available = evaluation.loc[evaluation["model"].isin(candidates)].copy()
     if set(available["model"]) != candidates:
         missing = sorted(candidates - set(available["model"]))
         raise ValueError(f"Hasil evaluasi model belum lengkap: {missing}")
-    if available[["rps", "log_loss"]].isna().any().any():
-        raise ValueError("RPS/log loss model kandidat tidak lengkap")
-    return available.sort_values(["rps", "log_loss", "model"]).iloc[0]
+    if available["cv_log_loss_mean"].isna().any():
+        raise ValueError("cv_log_loss_mean model kandidat tidak lengkap")
+    return (
+        available
+        .sort_values(["cv_log_loss_mean", "cv_accuracy_mean", "model"],
+                     ascending=[True, False, True])
+        .iloc[0]
+    )
 
 
 def display_teams(team_stats: pd.DataFrame, latest_season: str) -> None:
@@ -280,8 +293,8 @@ def print_prediction(
     print(line)
     print(
         f"Model   : {GOAL_MODEL_NAMES[goal_model_key]} "
-        f"(RPS Fase 7: {goal_selection['rps']:.6f}, "
-        f"log loss: {goal_selection['log_loss']:.6f})"
+        f"(CV log loss: {goal_selection['cv_log_loss_mean']:.6f}, "
+        f"basis: {goal_selection['selection_basis']})"
     )
     for rank, (home_goals, away_goals, probability) in enumerate(
         top_scorelines(score_grid), start=1
@@ -297,8 +310,8 @@ def print_prediction(
     print(line)
     print(
         f"Model   : {CLASSIFICATION_MODEL_NAMES[classification_key]} "
-        f"(RPS Fase 7: {classification_selection['rps']:.6f}, "
-        f"log loss: {classification_selection['log_loss']:.6f})"
+        f"(CV log loss: {classification_selection['cv_log_loss_mean']:.6f}, "
+        f"basis: {classification_selection['selection_basis']})"
     )
     print(f"  Home Win - {home_team:<28}: {ml_probabilities['H']:.2%}")
     print(f"  Draw{'':<35}: {ml_probabilities['D']:.2%}")
@@ -430,10 +443,10 @@ def print_prediction(
 def main() -> None:
     """Run the interactive multi-section prediction flow."""
     matches = pd.read_csv(MATCHES_PATH, parse_dates=["datetime", "date"])
-    evaluation = pd.read_csv(EVALUATION_PATH)
-    goal_selection = select_best_model(evaluation, GOAL_MODEL_CANDIDATES)
+    cv_selection = pd.read_csv(CV_SELECTION_PATH)
+    goal_selection = select_best_model(cv_selection, GOAL_MODEL_CANDIDATES)
     classification_selection = select_best_model(
-        evaluation, CLASSIFICATION_MODEL_CANDIDATES
+        cv_selection, CLASSIFICATION_MODEL_CANDIDATES
     )
 
     metadata = json.loads(ML_METADATA_PATH.read_text(encoding="utf-8"))
