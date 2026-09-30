@@ -460,13 +460,21 @@ def get_bottom_three_average_elo(
     return ELO_DEFAULT_RATING
 
 
-def identify_promoted_teams(matches: pd.DataFrame, season: str) -> set[str]:
-    """Identify teams appearing in season but not in previous season."""
+def identify_promoted_teams(matches: pd.DataFrame, season: str) -> list[str]:
+    """Identify teams appearing in season but not in previous season.
+
+    Dikembalikan sebagai list TERURUT, bukan ``set``. Callers meng-iterasi
+    hasilnya untuk menulis ``elo_coldstart_log.csv``, dan urutan iterasi set
+    di Python tidak stabil antar-proses (hash randomization untuk string).
+    Akibatnya file yang sudah di-commit jadi berubah urutan baris setiap
+    kali pipeline dijalankan, padahal isinya identik. Sort di sini
+    membuat artefak itu reproducible.
+    """
     seasons = sorted(matches['season'].unique())
     try:
         season_idx = seasons.index(season)
         if season_idx == 0:
-            return set()
+            return []
         
         prev_season = seasons[season_idx - 1]
         prev_teams = set(matches[matches['season'] == prev_season]['team_home']) | \
@@ -474,10 +482,10 @@ def identify_promoted_teams(matches: pd.DataFrame, season: str) -> set[str]:
         curr_teams = set(matches[matches['season'] == season]['team_home']) | \
                       set(matches[matches['season'] == season]['team_away'])
         
-        return curr_teams - prev_teams
+        return sorted(curr_teams - prev_teams)
     
     except (ValueError, IndexError):
-        return set()
+        return []
 
 
 def build_elo_history(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:

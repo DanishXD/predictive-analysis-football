@@ -3,6 +3,12 @@ requests>=2.31,<4.0
 pandas>=2.2,<4.0
 numpy>=1.26,<3.0
 scikit-learn>=1.5,<2.0
+# scipy dipakai LANGSUNG di blend.py, exposure_poisson.py, dan seasonal_hfa.py
+# (scipy.optimize.minimize untuk MLE stage-2 dengan offset, scipy.special.gammaln
+# untuk PMF Poisson). Package ini hanya ikut terpasang sebagai dependensi transitif
+# scikit-learn, jadi dideklarasikan eksplisit di sini supaya modul-modul itu
+# tidak rusak diam-diam kalau scikit-learn mengubah dependensinya.
+scipy>=1.11,<2.0
 xgboost>=2.1,<4.0
 jupyter>=1.1,<2.0
 matplotlib>=3.9,<4.0

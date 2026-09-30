@@ -12,7 +12,7 @@
     "accuracy": 0.47368421052631576,
     "draw_recall": 0.0,
     "draw_predictions": 2,
-    "mean_ece": 0.04082407371311414,
+    "mean_ece": 0.04082407371311413,
     "mean_pred_draw": 0.23116030067136856
   },
   "verdict": [
@@ -27,8 +27,8 @@
     },
     {
       "variant": "isotonic",
-      "rps": 0.21527305703337482,
-      "delta_rps": 0.0038521746719396843,
+      "rps": 0.21527305703337477,
+      "delta_rps": 0.003852174671939629,
       "delta_log_loss": 0.012613014896053931,
       "draw_recall": 0.0,
       "delta_draw_recall": 0.0,

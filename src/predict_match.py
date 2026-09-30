@@ -85,6 +85,29 @@ def select_best_model(
     )
 
 
+def describe_selection_metric(selection: pd.Series) -> str:
+    """Label metrik yang jujur mengikuti basis angka selection tersebut.
+
+    Angka Track A di ``cv_model_selection.csv`` DIHITUNG IN-SAMPLE: model
+    dievaluasi di data yang sama dengan data latihnya. Menyatakannya sebagai
+    "CV log loss" membuat angka itu terlihat setara dengan angka Track B yang
+    benar-benar out-of-fold, padahal keduanya tidak sebanding. Karena itu
+    labelnya ikut mengikuti ``selection_basis``, bukan ditulis hardcode.
+    """
+    value = float(selection["cv_log_loss_mean"])
+    basis = str(selection["selection_basis"])
+    basis_lower = basis.lower()
+    # Default-nya out-of-fold, dan hanya turun ke in-sample kalau basisnya
+    # secara eksplisit menyatakan begitu. Kalau dibalik, basis seperti
+    # "walk-forward musiman, season training saja" akan salah dilabeli
+    # in-sample padahal itu justru out-of-sample.
+    in_sample_markers = ("no cv", "in-sample", "insample", "train-only", "tidak tersedia")
+    is_in_sample = any(marker in basis_lower for marker in in_sample_markers)
+    if is_in_sample:
+        return f"in-sample log loss: {value:.6f}, basis: {basis} (bukan out-of-fold)"
+    return f"CV log loss: {value:.6f}, basis: {basis}"
+
+
 def display_teams(team_stats: pd.DataFrame, latest_season: str) -> None:
     """Print available teams with compact data-coverage context."""
     print("\nTim EPL yang tersedia di dataset:")
@@ -293,8 +316,7 @@ def print_prediction(
     print(line)
     print(
         f"Model   : {GOAL_MODEL_NAMES[goal_model_key]} "
-        f"(CV log loss: {goal_selection['cv_log_loss_mean']:.6f}, "
-        f"basis: {goal_selection['selection_basis']})"
+        f"({describe_selection_metric(goal_selection)})"
     )
     for rank, (home_goals, away_goals, probability) in enumerate(
         top_scorelines(score_grid), start=1
@@ -310,8 +332,7 @@ def print_prediction(
     print(line)
     print(
         f"Model   : {CLASSIFICATION_MODEL_NAMES[classification_key]} "
-        f"(CV log loss: {classification_selection['cv_log_loss_mean']:.6f}, "
-        f"basis: {classification_selection['selection_basis']})"
+        f"({describe_selection_metric(classification_selection)})"
     )
     print(f"  Home Win - {home_team:<28}: {ml_probabilities['H']:.2%}")
     print(f"  Draw{'':<35}: {ml_probabilities['D']:.2%}")
