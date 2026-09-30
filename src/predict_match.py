@@ -88,11 +88,13 @@ def select_best_model(
 def describe_selection_metric(selection: pd.Series) -> str:
     """Label metrik yang jujur mengikuti basis angka selection tersebut.
 
-    Angka Track A di ``cv_model_selection.csv`` DIHITUNG IN-SAMPLE: model
-    dievaluasi di data yang sama dengan data latihnya. Menyatakannya sebagai
-    "CV log loss" membuat angka itu terlihat setara dengan angka Track B yang
-    benar-benar out-of-fold, padahal keduanya tidak sebanding. Karena itu
-    labelnya ikut mengikuti ``selection_basis``, bukan ditulis hardcode.
+    Angka Track A di ``cv_model_selection.csv`` sekarang diambil dari
+    walk-forward CV (``src/track_a_cv.py``) sehingga sudah out-of-sample dan
+    sebanding dengan angka Track B. Tapi jalur in-sample masih ada sebagai
+    fallback kalau ``track_a_cv.py`` belum dijalankan, dan basis itulah yang
+    harus dicetak apa adanya. Menyatakannya sebagai "CV log loss" membuat
+    angka fallback terlihat setara dengan angka Track B padahal tidak
+    sebanding, jadi labelnya mengikuti ``selection_basis``, bukan hardcode.
     """
     value = float(selection["cv_log_loss_mean"])
     basis = str(selection["selection_basis"])

@@ -407,10 +407,11 @@ Menghitung metrik **out-of-sample** untuk Track A (Poisson, Dixon-Coles, Elo)
 lewat walk-forward musiman: 5 fold expanding-window dengan season validasi
 2020-2021 s.d. 2024-2025. `TEST_SEASON` tidak pernah dipakai sebagai fold.
 
-Alasan modul ini ada: angka Track A di `cv_model_selection.csv` dihitung
-**in-sample** (model dievaluasi di data yang sama dengan data latihnya),
-sedangkan angka Track B di tabel yang sama berasal dari TimeSeriesSplit
-out-of-fold. Modul ini menghasilkan angka yang benar-benar sebanding.
+Alasan modul ini ada: angka Track A di `cv_model_selection.csv` dulu
+dihitung **in-sample** (model dievaluasi di data yang sama dengan data
+latihnya), sedangkan angka Track B di tabel yang sama berasal dari
+TimeSeriesSplit out-of-fold. Modul ini menghasilkan angka yang benar-benar
+sebanding.
 
 ```text
 model          LogLoss       RPS      Acc
@@ -423,10 +424,12 @@ Dixon-Coles tidak memberi peningkatan bermakna di luar sampel (paired per
 fold: `+0.001586` log loss, hanya 1 dari 5 fold membaik) — konsisten dengan
 `rho ~ -0.004` yang sudah dicatat sebagai limitation.
 
-> **Status: belum disambungkan.** Angka di sini sengaja **tidak** dipakai
-> `evaluate.py` atau `predict_match.py` — `cv_model_selection.csv` masih
-> memakai angka in-sample Track A seperti sebelumnya, sampai angka ini
-> direview. Menyambungkannya bisa mengubah goal-model yang dipilih CLI.
+> **Status: sudah disambungkan (30 September 2026).** `evaluate.py` membaca
+> `data/processed/track_a_cv_results.csv` dan memakai angka di atas untuk
+> selection Track A, dengan guard keras yang menolak file bila ada fold
+> dengan `validation_season == TEST_SEASON`. Konsekuensinya **goal-model
+> produksi flip dari Dixon-Coles ke Poisson** — see `HANDOFF.md` §2.1.
+> Track B tidak berubah.
 >
 > Catatan: Elo di modul ini tanpa cold-start ClubElo (semua tim mulai dari
 > 1500) supaya deterministik dan tidak memanggil API luar yang bisa rate-limit.

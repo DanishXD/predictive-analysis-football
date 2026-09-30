@@ -39,16 +39,32 @@ Test season: **2025-2026** (380 match, out-of-sample).
 
 ## 2. Status produksi saat ini
 
-### 2.1 Pemilihan model (CV log loss, TimeSeriesSplit 5-fold)
+### 2.1 Pemilihan model (CV log loss, semua track out-of-sample)
+
+Track B pakai TimeSeriesSplit 5-fold; Track A pakai walk-forward musiman
+5 fold (lihat §13). Tidak ada lagi angka in-sample di tabel ini.
 
 | model | track | cv_log_loss_mean | cv_accuracy_mean | basis |
 |---|---|---|---|---|
 | **xgboost** | Track B | **0.980369** | 0.546874 | TimeSeriesSplit 5-fold CV |
 | random_forest | Track B | 0.982640 | 0.545098 | TimeSeriesSplit 5-fold CV |
 | logistic_regression | Track B | 1.016022 | 0.526199 | TimeSeriesSplit 5-fold CV |
-| poisson | Track A | 0.983279 | 0.537719 | train-only single split (no CV) |
-| dixon_coles | Track A | 0.983277 | 0.537719 | train-only single split (no CV) |
-| elo | Track A | 0.988762 | 0.536550 | train-only single split (no CV) |
+| poisson | Track A | 1.103723 | 0.448947 | walk-forward musiman, 5 fold (out-of-sample) |
+| dixon_coles | Track A | 1.105310 | 0.447895 | walk-forward musiman, 5 fold (out-of-sample) |
+| elo | Track A | 1.106281 | 0.461579 | walk-forward musiman, 5 fold (out-of-sample) |
+
+> **Goal-model FLIP (30 September 2026).** Sebelumnya angka Track A di tabel
+> ini dihitung in-sample dan winner-nya **Dixon-Coles** (0.983277) beating
+> Poisson (0.983279) dengan selisih **0.000002** — itu noise, bukan bukti.
+> Setelah disambungkan ke walk-forward CV, urutannya **Poisson**
+> (1.103723) > Dixon-Coles (1.105310) > Elo (1.106281), dengan selisih
+> 0.001586 dan berlaku konsisten di 5 fold. `predict_match.py` sekarang
+> memakai **Poisson** sebagai goal model produksi.
+>
+> Perhatikan juga: angka Track A in-sample (0.983) dan Track B out-of-fold
+> (0.980) tidak pernah sebanding. Sekarang keduanya out-of-sample, jadi
+> jarak 0.12 antara track adalah perbedaan kompleksitas model yang nyata,
+> bukan perbedaan metrik.
 
 ### 2.2 Performa di test season 2025-26 (380 match)
 
@@ -589,21 +605,25 @@ mengubah `ELO_K` atau `MAX_GOALS` di `config.py` membuat
 metrik jadi tidak apples-to-apple dan perbandingan model diam-diam tidak
 valid. Regression test baru mengunci kebocoran ini lewat monkeypatch.
 
-### 14.2 Angka Track A di `cv_model_selection.csv` itu in-sample
+### 14.2 Angka Track A di `cv_model_selection.csv` itu in-sample — **SELESAI**
 `evaluate._track_a_selection_metrics()` me-load model yang **di-fit di data
 training**, lalu menilainya di **data training yang sama**. Angka Track B di
 tabel yang sama berasal dari TimeSeriesSplit out-of-fold. Jadi kolom
 `cv_log_loss_mean` mencampur dua basis yang berbeda.
 
-Label `selection_basis` sudah jujur soal ini
-(`"train-only single split (no CV)"`), jadi tidak ada klaim palsu. Dampaknya
-belum merusak pemilihan model: kandidat goal-model semuanya Track A dan
-kandidat klasifikasi semuanya Track B, jadi perbandingan lintas track tidak
-pernah terjadi di `select_best_model`. Namun tabel ini menyesatkan kalau dibaca
-sebagai "CV ranking" tunggal.
+**Status: sudah diperbaiki (30 September 2026).** `evaluate.py` sekarang
+membaca `data/processed/track_a_cv_results.csv` hasil `src/track_a_cv.py`
+dan menghitung ulang mean/std per fold. Ditambah guard keras: kalau ada
+baris dengan `validation_season == TEST_SEASON`, `evaluate.py` melempar
+ValueError alih-alih diam-diam memakainya.
 
-Perbaikannya butuh walk-forward CV untuk Track A — sekarang sudah ada di
-`src/track_a_cv.py` (lihat §13).
+File agregat `track_a_cv_summary.csv` sengaja **tidak** dibaca untuk
+selection, karena tidak menyimpan kolom season sehingga guard kontaminasi
+tidak bisa diverifikasi darinya.
+
+Konsekuensi: **goal-model flip** dari Dixon-Coles ke Poisson (§2.1).
+In-sample fallback masih ada kalau `track_a_cv.py` belum dijalankan, dengan
+`selection_basis` yang jujur menandainya in-sample.
 
 ### 14.3 `README.md` salah menulis rentang training
 Tercantum "2021-2025 train" untuk corner model. Sebenarnya training period
@@ -697,11 +717,10 @@ CSV identik) dan terbukti **tidak menyentuh** `cv_model_selection.csv`.
 - **Topik terbuka xG belum selesai.** Sumber data belum dipilih user. Semua
   opsi berlisensi (OpenFootAPI / API-Football / TheStatsAPI) masih menunggu.
   Jangan scraping apa pun untuk ini sebelum user memutuskan.
-- Angka Track A di `cv_model_selection.csv` **masih in-sample** sampai user
-  memutuskan apakah `evaluate.py` boleh diubah memakai angka walk-forward CV
-  dari `track_a_cv.py`. Kalau diputuskan, perhatikan konsekuensinya:
-  `dixon_coles` vs `poisson` saat ini menang 0.0000018 di angka in-sample, dan
-  di CV Poisson justru lebih baik. Winner goal-model kemungkinan flip.
+- Angka Track A di `cv_model_selection.csv` sudah **disambung** ke walk-forward
+  CV pada 30 September 2026; goal-model flip ke Poisson (§2.1). Kalau
+  `track_a_cv_results.csv` dihapus, `evaluate.py` otomatis jatuh ke angka
+  in-sample dengan label jujur — bukan crash.
 - **Jangan mengulang HFA terpisah per musim** (§5.7). Sudah diuji dan tidak ada
   jalur validasinya.
 

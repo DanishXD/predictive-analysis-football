@@ -32,6 +32,11 @@ STATISTICAL_PATH = PROCESSED_DIR / "test_match_probabilities.csv"
 ELO_PATH = PROCESSED_DIR / "elo_history.csv"
 ML_PATH = PROCESSED_DIR / "ml_test_predictions.csv"
 STACKING_PATH = PROCESSED_DIR / "stacking_test_predictions.csv"
+# Ringkasan walk-forward Track A dari src/track_a_cv.py. Dipakai untuk
+# selection angka Track A yang out-of-sample, bukan in-sample. File opsional:
+# kalau belum ada, evaluate.py jatuh ke angka in-sample dengan selection_basis
+# yang mengatakannya.
+TRACK_A_CV_RESULTS_PATH = PROCESSED_DIR / "track_a_cv_results.csv"
 ML_METRICS_PATH = PROCESSED_DIR / "ml_model_metrics.csv"
 STATISTICAL_METRICS_PATH = PROCESSED_DIR / "statistical_model_metrics.csv"
 POISSON_MODEL_PATH = MODELS_DIR / "poisson_goal_model.pkl"
@@ -880,14 +885,77 @@ def _log_loss_and_accuracy(
     )
 
 
+def _load_track_a_walk_forward() -> dict[str, dict]:
+    """Hitung ulang ringkasan walk-forward Track A dari hasil per fold.
+
+    Sengaja membaca ``track_a_cv_results.csv`` (per fold) dan bukan
+    ``track_a_cv_summary.csv`` (agregat), supaya season validasi tiap fold
+    bisa diperiksa langsung. File agregat tidak menyimpan kolom season, jadi
+    guard kontaminasi test season tidak akan bisa diverifikasi darinya.
+
+    Kalau file per-fold belum ada, dikembalikan dict kosong supaya
+    evaluate.py jatuh ke jalur in-sample dengan ``selection_basis`` yang
+    jujur. Test season tidak boleh pernah jadi fold di sini; kalau iya,
+    itu error keras, bukan diasumsikan aman.
+    """
+    if not TRACK_A_CV_RESULTS_PATH.exists():
+        return {}
+
+    results = pd.read_csv(TRACK_A_CV_RESULTS_PATH)
+    required = {
+        "model",
+        "fold",
+        "validation_season",
+        "log_loss",
+        "accuracy",
+    }
+    if not required.issubset(results.columns):
+        return {}
+
+    contaminated = results.loc[results["validation_season"] == TEST_SEASON, "model"]
+    if not contaminated.empty:
+        raise ValueError(
+            "track_a_cv_results.csv mengandung baris dengan season validasi "
+            f"TEST_SEASON ({TEST_SEASON}) untuk model {sorted(contaminated)}. "
+            "Angka Track A untuk model selection harus out-of-sample di "
+            "training season saja."
+        )
+
+    rows = {}
+    for model, group in results.groupby("model"):
+        rows[model] = {
+            "model": model,
+            "track": "Track A",
+            "cv_log_loss_mean": float(group["log_loss"].mean()),
+            "cv_log_loss_std": float(group["log_loss"].std()),
+            "cv_accuracy_mean": float(group["accuracy"].mean()),
+            "cv_accuracy_std": float(group["accuracy"].std()),
+            "selection_basis": (
+                "walk-forward musiman season training saja, "
+                f"{group['fold'].nunique()} fold (out-of-sample)"
+            ),
+            "draw_recall": np.nan,
+        }
+    return rows
+
+
 def _track_a_selection_metrics() -> pd.DataFrame:
     """Hitung log loss & accuracy Track A pada data TRAINING saja.
 
-    Model Poisson/Dixon-Coles tidak punya cross-validation, jadi dipakai
-    single-split di atas data training. Test metrics sengaja tidak dipakai:
-    memakai test set untuk memilih model justru kontaminasi yang dihindari
-    dalam model selection. Label selection_basis menyatakan basisnya dengan jujur.
+    Track A punya dua sumber angka, dan yang dipakai bergantung pada apa yang
+    tersedia:
+
+    1. **Walk-forward CV** dari ``src/track_a_cv.py`` (disukai). Angka
+       out-of-sample di season training, jadi SEBANDING dengan Track B yang
+       juga out-of-fold.
+    2. **In-sample single split** (fallback). Model dievaluasi di data yang
+       sama dengan data latihnya. Angka ini tidak sebanding dengan Track B
+       dan karena itu selection_basis mengatakannya secara eksplisit.
+
+    Test metrics sengaja tidak dipakai: memakai test set untuk memilih model
+    justru kontaminasi yang dihindari dalam model selection.
     """
+    walk_forward = _load_track_a_walk_forward()
     train = _train_rows()
     y_true = train["result"].map(TARGET_MAPPING).to_numpy()
     rows = []
@@ -897,6 +965,9 @@ def _track_a_selection_metrics() -> pd.DataFrame:
         ("dixon_coles", DIXON_COLES_MODEL_PATH, pb.models.DixonColesGoalModel),
     ]
     for name, path, model_class in goal_models:
+        if name in walk_forward:
+            rows.append(walk_forward[name])
+            continue
         if not path.exists():
             rows.append(
                 {
@@ -922,14 +993,16 @@ def _track_a_selection_metrics() -> pd.DataFrame:
                 "cv_log_loss_std": np.nan,
                 "cv_accuracy_mean": accuracy,
                 "cv_accuracy_std": np.nan,
-                "selection_basis": "train-only single split (no CV)",
+                "selection_basis": "train-only in-sample (bukan out-of-fold)",
                 "draw_recall": np.nan,
             }
         )
 
     # Elo: likewise train-only, rebuilt from the saved pre-match ratings.
     elo_path = ELO_PATH
-    if elo_path.exists():
+    if "elo" in walk_forward:
+        rows.append(walk_forward["elo"])
+    elif elo_path.exists():
         elo_history = pd.read_csv(elo_path)
         train_seasons = sorted(train["season"].unique())
         home_rows = elo_history.loc[
