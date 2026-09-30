@@ -1025,7 +1025,7 @@ def _track_a_selection_metrics() -> pd.DataFrame:
                     "cv_log_loss_std": np.nan,
                     "cv_accuracy_mean": accuracy,
                     "cv_accuracy_std": np.nan,
-                    "selection_basis": "train-only single split (no CV)",
+                    "selection_basis": "train-only in-sample (bukan out-of-fold)",
                     "draw_recall": np.nan,
                 }
             )
