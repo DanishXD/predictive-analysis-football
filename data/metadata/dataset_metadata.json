@@ -1,0 +1,78 @@
+{
+  "_schema_version": "1.0",
+  "_description": "Data provenance untuk matches_clean.csv — single source of truth dataset.",
+  "dataset_name": "EPL Match Results 2016-2026",
+  "primary_source": "football-data.co.uk",
+  "secondary_sources": [
+    "penaltyblog scraper (primary fetch method)",
+    "football-data.co.uk direct CSV download (fallback jika scraper gagal)"
+  ],
+  "collection_script": "src/data_collection.py",
+  "processed_file": "data/processed/matches_clean.csv",
+  "raw_files_dir": "data/raw/",
+  "raw_files": [
+    "epl_2016-2017.csv",
+    "epl_2017-2018.csv",
+    "epl_2018-2019.csv",
+    "epl_2019-2020.csv",
+    "epl_2020-2021.csv",
+    "epl_2021-2022.csv",
+    "epl_2022-2023.csv",
+    "epl_2023-2024.csv",
+    "epl_2024-2025.csv",
+    "epl_2025-2026.csv"
+  ],
+  "total_matches": 3800,
+  "n_seasons": 10,
+  "seasons": [
+    "2016-2017",
+    "2017-2018",
+    "2018-2019",
+    "2019-2020",
+    "2020-2021",
+    "2021-2022",
+    "2022-2023",
+    "2023-2024",
+    "2024-2025",
+    "2025-2026"
+  ],
+  "date_range": {
+    "first_match": "2016-08-13",
+    "last_match": "2026-05-24"
+  },
+  "columns_key": {
+    "match_id": "unique match identifier",
+    "season": "season label (e.g. 2025-2026)",
+    "date": "match date",
+    "datetime": "match datetime",
+    "team_home": "home team (standardized via team_mapping.py)",
+    "team_away": "away team (standardized via team_mapping.py)",
+    "result": "match result — H (home win), D (draw), A (away win)",
+    "fthg": "full time home goals",
+    "ftag": "full time away goals",
+    "hc": "home corners",
+    "ac": "away corners",
+    "hy": "home yellow cards",
+    "ay": "away yellow cards",
+    "hr": "home red cards",
+    "ar": "away red cards",
+    "odds_avg_home": "average market odds home win (decimal)",
+    "odds_avg_draw": "average market odds draw (decimal)",
+    "odds_avg_away": "average market odds away win (decimal)"
+  },
+  "cleaning_steps": [
+    "Standardisasi nama tim via src/team_mapping.py",
+    "Drop baris dengan result/goals/odds hilang",
+    "Parse tanggal ke datetime",
+    "Assign match_id unik per pertandingan"
+  ],
+  "known_limitations": [
+    "Data pemain (cedera, suspensi, line-up) tidak tersedia",
+    "Odds adalah rata-rata pasar — bukan odds dari satu bookmaker tertentu",
+    "Musim 2025-26 mungkin belum selesai saat data dikumpulkan (last match: 2026-05-24)",
+    "Data hanya mencakup EPL — tidak ada data European/cup competition"
+  ],
+  "last_updated": "2026-08-01T15:52:27",
+  "provenance_recorded_at": "2026-09-22",
+  "usage_terms": "Data football-data.co.uk untuk keperluan personal/edukasi (non-commercial). Tidak dicommit ke repo publik — lihat .gitignore."
+}
