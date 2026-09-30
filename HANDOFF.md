@@ -232,7 +232,62 @@ Varian A (HFA tanpa musim no-fans) di 4 fold: delta log loss +0.000277,
 Jalankan `python src/seasonal_hfa.py` untuk angkanya. Modul ini murni laporan:
 tidak menulis model produksi dan tidak menyentuh `evaluate.py`.
 
-### 5.8 Yang TIDAK berhasil dan tidak dicoba lagi
+### 5.8 Exposure-based Poisson (bukan xG) - `src/exposure_poisson.py`
+
+Topik xG (§9) berakhir dengan kesimpulan: tidak ada sumber xG EPL gratis yang
+berlisensi jelas. Yang invece adalah memakai kolom `shots`/`shots_on_target`
+yang sudah ada di dataset.
+
+Struktur dua tahap. Model offset tunggal `lambda = shots * exp(...)` hanya bisa
+dihitung untuk match yang sudah selesai, jadi exposure itu sendiri harus
+diprediksi lebih dulu:
+
+```
+sigma = E[shots]            (stage 1, penaltyblog Poisson di-fit pada shots)
+q     = P(goal | shot)      (stage 2, Poisson dengan offset log(shots))
+lambda = sigma * q
+```
+
+Varian SOT menambah satu tahap: `q = P(SOT | shot) * P(goal | SOT)`.
+
+**Hasil walk-forward CV (5 fold, season validasi 2020-2021 s.d. 2024-2025,
+xi di-grid-search untuk kedua lengan lalu best-vs-best):**
+
+| model | xi terbaik | log loss | RPS | accuracy |
+|---|---|---|---|---|
+| **sot** | 0.0025 | **0.997688** | **0.209706** | 0.517368 |
+| poisson_goals_based | 0.0025 | 1.002893 | 0.211598 | 0.520000 |
+| shot_volume | 0.0025 | 1.004002 | 0.212677 | 0.508421 |
+
+Paired vs baseline (negatif = lebih baik):
+
+```
+sot           delta log loss -0.005205, CI 95% [-0.008340, -0.002153],
+              SIGNIFIKAN, menang 5 dari 5 fold (log loss DAN RPS)
+shot_volume   delta log loss +0.001109, CI 95% [-0.005091, +0.007150],
+              tidak signifikan, menang 3 dari 5 fold
+```
+
+**Kesimpulan: varian SOT berhasil, shot-count biasa gagal.** Varian SOT
+membaik di kelima fold pada dua metrik sekaligus, dan CI-nya tidak melintasi
+nol — pola yang jarang di eksperimen manapun di project ini (§5.1-§5.7 semuanya
+tidak signifikan). Varian `shot_volume` justru sedikit memburuk, jadi efeknya
+bukan dari "tembakan" secara umum, tapi dari pemisahan tiga tahap
+shots -> SOT -> goal.
+
+**Temuan sampingan yang tak terduga: home advantage praktis seluruhnya ada di
+volume, bukan di efisiensi.** Rasio home/away di training season: goals 1.212,
+shots 1.204, tapi conversion rate hanya 1.006 dan SOT-rate 0.986. Karena itu
+parameter `home_advantage` di stage-2 berakhir di batas bawah ~0.000 — itu
+HASIL yang benar, bukan kegagalan optimasi. Test
+`test_stage2_home_advantage_is_negligible` mengunci temuan ini.
+
+> **Belum jadi produksi.** Angka di atas masih CV di training season dengan
+> bias selection pada xi. `evaluate.py`, `predict_match.py`, dan
+> `cv_model_selection.csv` sengaja tidak disentuh. Kalau mau diethyl di test
+> season, itu keputusan terpisah.
+
+### 5.9 Yang TIDAK berhasil dan tidak dicoba lagi
 - Eksclude musim 2020/21 dari training (membuang data, tidak sesuai scope)
 - Menambah fitur wasit sebagai kategorikal langsung (Poisson penaltyblog hanya support
   param per-tim + home advantage, bukan kategorikal)

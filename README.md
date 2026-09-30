@@ -30,6 +30,7 @@ Scope dan keputusan teknis lengkap (termasuk alasan di balik setiap pilihan meto
   - [Fase 18: Koreksi Output Probability (Eksperimen)](#fase-18-koreksi-output-probability-eksperimen)
   - [Fase 19: Hyperparameter Tuning (Eksperimen)](#fase-19-hyperparameter-tuning-eksperimen)
   - [Eksperimen Track A: Walk-Forward CV](#eksperimen-track-a-walk-forward-cv)
+  - [Eksperimen Exposure-Based Poisson (bukan xG)](#eksperimen-exposure-based-poisson-bukan-xg)
   - [Eksperimen Seasonal HFA](#eksperimen-seasonal-hfa)
 - [Keterbatasan & Disclaimer](#keterbatasan--disclaimer)
 - [Kredit & Sumber Data](#kredit--sumber-data)
@@ -60,6 +61,7 @@ football-predictive-analysis/
 │   ├── model_calibration.py    # Fase 18 (eksperimen — hasil negatif)
 │   ├── model_tuning.py         # Fase 19 (eksperimen)
 │   ├── track_a_cv.py           # eksperimen walk-forward CV Track A
+│   ├── exposure_poisson.py     # eksperimen exposure-based Poisson (bukan xG)
 │   ├── seasonal_hfa.py         # eksperimen HFA musim no-fans (hasil negatif)
 │   ├── predict_match.py        # Fase 9, 12, 15
 │   ├── player_stats.py         # Fase 10 — statistik musiman pemain
@@ -427,6 +429,48 @@ fold: `+0.001586` log loss, hanya 1 dari 5 fold membaik) — konsisten dengan
 > Catatan: Elo di modul ini tanpa cold-start ClubElo (semua tim mulai dari
 > 1500) supaya deterministik dan tidak memanggil API luar yang bisa rate-limit.
 > Jadi angka Elo di sini tidak langsung sebanding dengan Elo produksi.
+
+### Eksperimen Exposure-Based Poisson (bukan xG)
+
+```powershell
+python src/exposure_poisson.py
+```
+
+Menguji apakah volume tembakan (`shots`) dan efisiensi per tembakan membawa
+informasi yang tidak ada di data gol. **Ini bukan model berbasis xG** — tidak
+ada shot location atau shot quality, hanya agregat per tim per match.
+
+Struktur dua tahap. Model offset tunggal hanya bisa dipakai untuk match yang
+sudah selesai, jadi exposure itu sendiri harus diprediksi lebih dulu:
+
+```text
+sigma  = E[shots]         (stage 1, penaltyblog Poisson di-fit pada shots)
+q      = P(goal | shot)   (stage 2, Poisson dengan offset log(shots))
+lambda = sigma * q
+```
+
+Varian SOT menambah tahap: `q = P(SOT | shot) * P(goal | SOT)`.
+
+```text
+model                   log loss      RPS  accuracy
+sot                     0.997688  0.209706  0.517368
+poisson_goals_based     1.002893  0.211598  0.520000
+shot_volume             1.004002  0.212677  0.508421
+```
+
+Varian **SOT menang di kelima fold** pada log loss dan RPS, dengan 95% CI
+[-0.008340, -0.002153] (tidak melintasi nol). Varian `shot_volume` justru
+tidak signifikan — jadi efeknya bukan dari "tembakan" secara umum, tapi dari
+pemisahan shots -> SOT -> goal.
+
+Temuan sampingan: home advantage praktis seluruhnya ada di volume, bukan di
+efisiensi. Rasio home/away di training: goals 1.212, shots 1.204, tapi
+conversion rate hanya 1.006. Karena itu parameter home-advantage di stage-2
+berakhir di ~0 — hasil yang benar, bukan kegagalan optimasi.
+
+> **Status: belum jadi produksi.** Angka di atas masih CV di training season
+> dengan bias selection pada `xi`, dan `evaluate.py`/`predict_match.py`
+> sengaja tidak disentuh. Detail di [`HANDOFF.md`](./HANDOFF.md) bagian 5.8.
 
 ### Eksperimen Seasonal HFA
 

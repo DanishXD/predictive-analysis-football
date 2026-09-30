@@ -28,7 +28,8 @@ Semua dijalankan dari root project dengan interpreter venv:
 Opsional: `src/stacking.py`, `src/corner_model.py`, `src/discipline_model.py`, `src/value_betting.py`.
 
 Eksperimen (tidak mengubah model produksi, tidak mengubah `cv_model_selection.csv`):
-`src/model_calibration.py`, `src/model_tuning.py`, `src/track_a_cv.py`, `src/seasonal_hfa.py`.
+`src/model_calibration.py`, `src/model_tuning.py`, `src/track_a_cv.py`,
+`src/exposure_poisson.py`, `src/seasonal_hfa.py`.
 Hasil negatif yang sudah tercatat ada di `HANDOFF.md` bagian 5 — baca dulu sebelum
 mencoba pendekatan yang sama lagi.
 

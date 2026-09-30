@@ -59,6 +59,29 @@ ELO_K = 20.0
 ELO_HOME_ADVANTAGE = 100.0
 ELO_DEFAULT_RATING = 1500.0
 
+# --- Exposure-based Poisson (eksperimen src/exposure_poisson.py) ---
+# Grid time-decay untuk model ini. Sengaja TIDAK memakai TIME_DECAY_XI sebagai
+# satu-satunya nilai: target variabelnya berubah (goals -> goals per exposure),
+# jadi bobot yang optimal belum tentu sama dengan Poisson goal-based.
+#
+# Grid ini searched untuk KEDUA lengan perbandingan (exposure-based DAN
+# goals-based) dengan cara identik, lalu dibandingkan best-vs-best. Kalau
+# hanya exposure yang di-search, perbandingannya bias dan tidak bisa
+# disimpulkan apakah selisihnya datang dari exposure atau dari xi.
+EXPOSURE_XI_GRID = (0.001, 0.0018, 0.0025, 0.0035, 0.005)
+
+# Bounds parameter tim untuk fitter stage-2 (Poisson dengan offset).
+# Nilainya sama dengan yang penaltyblog pakai untuk Poisson goal-based, supaya
+# perbandingan antar model tidak dibatasi secara tidak sengaja.
+EXPOSURE_STAGE2_BOUNDS = (-3.0, 3.0)
+EXPOSURE_STAGE2_HFA_BOUNDS = (0.0, 3.0)
+
+# Batas bawah jumlah tembakan untuk sebuah baris dipakai di stage-2. Baris
+# dengan exposure 0 tidak punya informasi apa pun soal per-shot rate (log(0)
+# undefined dan kontribusinya nol), jadi dilewati. Di dataset 2016/17-2025/26
+# hanya 2 dari 3.800 baris yang terkena.
+EXPOSURE_MIN_TRIALS = 1
+
 # Rescale rating ClubElo mentah ke skala Elo internal (start 1500, K=20,
 # HFA=100). Di-fit OLS 2026-09-26 dari 2787 pasangan rating per-tanggal milik
 # 14 tim EPL non-promosi pada window chart ClubElo 2022-10 s/d 2026-09
