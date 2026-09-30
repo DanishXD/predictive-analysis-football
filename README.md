@@ -31,6 +31,7 @@ Scope dan keputusan teknis lengkap (termasuk alasan di balik setiap pilihan meto
   - [Fase 19: Hyperparameter Tuning (Eksperimen)](#fase-19-hyperparameter-tuning-eksperimen)
   - [Eksperimen Track A: Walk-Forward CV](#eksperimen-track-a-walk-forward-cv)
   - [Eksperimen Exposure-Based Poisson (bukan xG)](#eksperimen-exposure-based-poisson-bukan-xg)
+  - [Eksperimen Blend Sistematis (semua model)](#eksperimen-blend-sistematis-semua-model)
   - [Eksperimen Seasonal HFA](#eksperimen-seasonal-hfa)
 - [Keterbatasan & Disclaimer](#keterbatasan--disclaimer)
 - [Kredit & Sumber Data](#kredit--sumber-data)
@@ -62,6 +63,7 @@ football-predictive-analysis/
 │   ├── model_tuning.py         # Fase 19 (eksperimen)
 │   ├── track_a_cv.py           # eksperimen walk-forward CV Track A
 │   ├── exposure_poisson.py     # eksperimen exposure-based Poisson (bukan xG)
+│   ├── blend.py                # eksperimen blend semua model (hasil negatif)
 │   ├── seasonal_hfa.py         # eksperimen HFA musim no-fans (hasil negatif)
 │   ├── predict_match.py        # Fase 9, 12, 15
 │   ├── player_stats.py         # Fase 10 — statistik musiman pemain
@@ -471,6 +473,26 @@ berakhir di ~0 — hasil yang benar, bukan kegagalan optimasi.
 > **Status: belum jadi produksi.** Angka di atas masih CV di training season
 > dengan bias selection pada `xi`, dan `evaluate.py`/`predict_match.py`
 > sengaja tidak disentuh. Detail di [`HANDOFF.md`](./HANDOFF.md) bagian 5.8.
+
+### Eksperimen Blend Sistematis (semua model)
+
+```powershell
+python src/blend.py
+```
+
+Meta-learner (Logistic Regression) di atas probabilitas 1X2 dari 7 base
+model: `poisson`, `dixon_coles`, `elo`, `logistic_regression`,
+`random_forest`, `xgboost`, dan `exposure_sot`.
+
+Anti-leakage berlapis: base model di-fit ulang per fold, meta-learner
+dilatih **hanya** pada prediksi out-of-fold, dan meta-learner sendiri
+dievaluasi walk-forward di level kedua. Test season hanya dibaca sekali
+untuk pelaporan.
+
+> **Hasil: blend TIDAK mengalahkan model tunggal terbaik.** Ranking CV juga
+> tidak transfer ke test season — rata-rata sederhana menang di CV
+> (0.979351 vs 0.984392) tapi kalah di test (1.043516 vs 1.037602).
+> Detail lengkap di [`HANDOFF.md`](./HANDOFF.md) bagian 5.9.
 
 ### Eksperimen Seasonal HFA
 

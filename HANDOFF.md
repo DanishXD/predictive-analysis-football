@@ -287,11 +287,88 @@ HASIL yang benar, bukan kegagalan optimasi. Test
 > `cv_model_selection.csv` sengaja tidak disentuh. Kalau mau diethyl di test
 > season, itu keputusan terpisah.
 
-### 5.9 Yang TIDAK berhasil dan tidak dicoba lagi
+### 5.9 Blend sistematis semua model (meta-learner di atas OOF) - `src/blend.py`
+
+Korrection premis lebih dulu, karena dua asumsi yang masuk ke permintaan
+tidak sesuai kenyataan repo:
+
+- **Tidak ada RF "ter-tuning & terkalibrasi".** Tuning RF: delta RPS
+  -0.000013, tidak significant (§5.6). Kalibrasi post-hoc: raw 0.211421,
+  sigmoid 0.213966, isotonic 0.215273 — raw menang (§5.2). `train_model.py`
+  masih pakai setting Phase 5. Yang ter-tuning hanya XGBoost.
+- **Tidak ada model xG.** Yang Week 3 hasil = exposure-based Poisson, bukan xG.
+
+Jadi 7 base model yang di-blend: `poisson`, `dixon_coles`, `elo`,
+`logistic_regression`, `random_forest`, `xgboost`, `exposure_sot`.
+
+**Level-2 walk-forward (training season) — angka penentu:**
+
+| model | log loss | RPS |
+|---|---|---|
+| **blend_simple_average** | **0.979351** | **0.203578** |
+| xgboost | 0.984392 | 0.204230 |
+| random_forest | 0.985576 | 0.204280 |
+| blend_meta | 0.991770 | 0.205512 |
+| poisson | 0.992172 | 0.208308 |
+| exposure_sot | 0.995162 | 0.209164 |
+| elo | 1.103300 | 0.240926 |
+
+**Test season 2025-26 (pelaporan saja):**
+
+| model | log loss | RPS |
+|---|---|---|
+| bookmaker_avg_odds | **1.015252** | **0.205280** |
+| random_forest | 1.037602 | 0.211421 |
+| blend_meta | 1.042192 | 0.212752 |
+| blend_simple_average | 1.043516 | 0.213098 |
+| exposure_sot | 1.076536 | 0.222888 |
+
+**HASIL: blend TIDAK mengalahkan model tunggal terbaik.** Dan lebih penting,
+**ranking CV tidak transfer ke test season:**
+
+```
+CV  : simple_average 0.979351 vs xgboost 0.984392  -> blend menang -0.005041
+Test: simple_average 1.043516 vs random_forest 1.037602 -> blend KALAH +0.005914
+      CI 95% [-0.010938, +0.022800], tidak significant
+```
+
+blend_meta vs random_forest di test: `+0.004591`, CI `[-0.012508, +0.021644]`,
+tidak significant. Ini pola yang sama seperti kesalahan lambda di §5.3:
+perbaikan yang terlihat di CV hilang (bahkan berbalik) di test.
+
+**Catatan fold 2.** Di level-2 CV, fold 2 hanya punya 599 baris untuk
+melatih meta-learner, dan `blend_meta` di fold itu 1.045805 vs simple average
+1.003654. Exclusion fold 2 menaikkan simple_average ke 0.971250 dan
+blend_meta ke 0.973758, tapi urutan relatif tidak berubah.
+
+### 5.10 Jarak ke odds bandar setelah 4 minggu perbaikan
+
+Ini jawaban langsung atas pertanyaan "seberapa dekat ke bandar dibanding
+sebelum semua perbaikan dimulai". Angka "sebelum" dari capture pre-upgrade di
+`research/evaluations/baseline.md` (random_forest, RPS 0.211, log loss 1.036;
+bookmaker RPS 0.205, log loss 1.015).
+
+| kandidat | gap log loss sekarang | gap RPS sekarang | perubahan vs dulu |
+|---|---|---|---|
+| best_single_model (random_forest) | +0.022349 | +0.006141 | **+0.001349** |
+| blend_meta | +0.026940 | +0.007473 | +0.005940 |
+| blend_simple_average | +0.028264 | +0.007819 | +0.007264 |
+
+Gap SEBELUM: log loss +0.021000, RPS +0.006000.
+
+**Kesimpulan jujur: empat minggu kerja tidak memperkecil jarak ke bandar sama
+sekali — jaraknya justru sedikit melebar (+0.0013 log loss).** Dari 7
+eksperimen, hanya exposure-based SOT yang signifikan, dan itu baru terbukti di
+CV training season, belum diuji di test season. Sisanya (§5.1-§5.7) gagal.
+
+### 5.11 Yang TIDAK berhasil dan tidak dicoba lagi
 - Eksclude musim 2020/21 dari training (membuang data, tidak sesuai scope)
 - Menambah fitur wasit sebagai kategorikal langsung (Poisson penaltyblog hanya support
   param per-tim + home advantage, bukan kategorikal)
 - HFA terpisah per musim untuk musim no-fans (lihat §5.7)
+- Blend meta-learner di atas seluruh base model (lihat §5.9) — menang di CV
+  tapi tidak transfer ke test season.
+- Rata-rata aritmetik semua base model tanpa bobot (§5.9)
 
 ---
 
