@@ -403,6 +403,15 @@ Fold 6 = existing single split, so baseline metrics are preserved.
 - `research/JOURNAL.md` (MODIFIED — results after run)
 - `research/MANIFEST.md` (MODIFIED — index update)
 
+> **RENAMED 2026-09-30.** `src/walk_forward.py` sekarang
+> `src/walk_forward_track_b_including_test.py`, dan file outputnya jadi
+> `data/processed/walk_forward_track_b_including_test_{results,summary}.csv`.
+> Nama lama tidak membedakan modul ini dari `src/track_a_cv.py`, padahal
+> keduanya berlawanan soal test season: modul ini memakai `2025-2026` (= `TEST_SEASON`)
+> sebagai fold 6, sedangkan `track_a_cv.py` berhenti di season training dan
+> itulah yang dipakai `evaluate.py` untuk model selection. Isi task ini
+> tidak diubah, hanya nama file-nya.
+
 ### Evidence
 
 - ✅ `src/walk_forward.py` dibuat (233 baris)
@@ -634,6 +643,97 @@ setiap kali pipeline di-retrain.
 **Task 0.5 Status**: COMPLETED  
 **Evidence Level**: E2 (infrastructure verified)  
 **Git Commit**: [pending]
+
+---
+
+## PROGRESS UPDATE — 30 September 2026
+
+Jurnal ini berisi task TASK-0000 s.d. TASK-0005 dari sesi agent terpisah
+(21-22 September 2026). Update di bawah memakai kata "kita" untuk hasil
+pekerjaan yang dilakukan langsung di repo project, yang TIDAK tercatat di
+task-task tersebut.
+
+### Yang terjadi di luar jurnal ini
+
+**Commit `1740114` — bootstrap CI + model selection berbasis CV.**
+`src/evaluate.py` dapat paired bootstrap CI dan perbandingan antar model
+signifikan; `src/predict_match.py` membaca `cv_model_selection.csv` untuk
+memilih model; `tests/test_select_best_model.py` arose sebagai regression
+guard anti-leakage selection.
+
+**Test suite 92 → 178 tes.** Aggravated dari 4 file test menjadi belasan.
+
+**Eksperimen negatif (`HANDOFF.md` §5).** Sepuluh pendekatan yang dicoba
+dan tidak berhasil: `class_weight='balanced'` untuk Draw, post-hoc
+calibration, draw-prior adjustment, fitur wasit, `is_empty_stadium`,
+tuning RF, HFA per musim no-fans, exposure-based Poisson, blend
+meta-learner, dan stacking RF+XGB. Detail lengkap termasuk angka dan
+bootstrap CI ada di `HANDOFF.md` §5.
+
+**`src/track_a_cv.py` — walk-forward CV untuk Track A (21 September).**
+Lima fold expanding-window dengan season validasi `2020-2021` s.d.
+`2024-2025`, season training saja, `TEST_SEASON` tidak pernah jadi fold.
+Hasil: Poisson 1.103723 > Dixon-Coles 1.105310 > Elo 1.106281 log loss.
+
+**`src/seasonal_hfa.py`, `src/exposure_poisson.py`, `src/blend.py`.**
+Tiga eksperimen lain; hanya exposure-Poisson yang menunjukkan peningkatan
+signifikan, dan baru di CV training season.
+
+### Tiga perubahan yang mengubah hasil produksi (30 September 2026)
+
+1. **Goal-model FLIP: Dixon-Coles → Poisson** (`647d9f3`).
+   `evaluate.py` sekarang memakai angka walk-forward Track A untuk
+   `cv_model_selection.csv`, bukan angka in-sample. Di angka in-sample lama
+   Dixon-Coles menang atas Poisson dengan selisih **0.000002** — itu noise.
+   Out-of-sample selisihnya 0.001586 dan konsisten di 5 fold. `predict_match.py`
+   sekarang mencetak `Model : Poisson (CV log loss: 1.103723, basis:
+   walk-forward musiman season training saja, 5 fold (out-of-sample))`.
+   Track B tidak berubah: XGBoost tetap model klasifikasi terbaik.
+   Konsekuensi lain: jarak 0.12 antar track di `cv_model_selection.csv`
+   sekarang adalah perbedaan kompleksitas model, bukan perbedaan metrik.
+
+2. **Skema `evaluation_summary.csv` distabilkan** (`9ed3bb4`).
+   Sebelumnya jumlah baris 7 atau 8 tergantung apakah
+   `data/processed/stacking_test_predictions.csv` ada — jadi artefak
+   "canonical" Fase 7 tidak reproducible di mesin berbeda tanpa error.
+   Sekarang selalu 8 baris dengan kolom `available`; model yang belum punya
+   prediksi ditandai `available=False` dengan metrik `NaN`. Kolom `available`
+   disortir lebih dulu supaya model yang bisa dinilai tidak tenggelam di
+   bawah baris NaN. `validate_outputs` ditulis ulang karena versi lama
+   menolak NaN dan menghitung jumlah baris secara dinamis — keduanya
+   bertentangan dengan skema baru.
+
+3. **Empat perbaikan cepat.** `value_betting.py` tidak bisa dijalankan
+   sebagai skrip (`from pathlib import Path` hilang); `identify_promoted_teams()`
+   mengembalikan list dalam urutan yang tidak dijamin sehingga dua run
+   menghasilkan `elo_coldstart_log.csv` berbeda; `describe_selection_metric()`
+   sudah membedakan CV out-of-fold vs in-sample; `scipy` belum ada di
+   `requirements.txt` padahal dipakai. Semuanya dikunci regression test.
+
+**Test suite 178 → 237 tes.**
+
+### Yang masih terbuka
+
+- Topik xG belum mulai: sumber data belum dipilih (OpenFootAPI /
+  API-Football / TheStatsAPI semuanya berlisensi). Jangan scraping apa pun
+  sebelum user memutuskan.
+- Exposure-based Poisson perlu diuji di test season sebelum diklaim berhasil.
+- Margin ke odds bandar justru sedikit melebar setelah 4 minggu (§5.11).
+
+### Metadata eksperimen yang belum ter-commit
+
+`data/metadata/` punya empat file hasil eksperimen §5 yang sengaja
+belum di-commit karena bukan output produksi dan bisa di-regenerasi:
+
+```
+blend_summary.json
+exposure_poisson_summary.json
+seasonal_hfa_summary.json
+track_a_cv_summary.json
+```
+
+`dataset_metadata.json` dan `calibration_summary.json` sudah ter-commit
+karena keduanya dipakai jalur produksi.
 
 ---
 

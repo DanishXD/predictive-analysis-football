@@ -1,5 +1,22 @@
 # AUDIT FIXES COMPLETE — FINAL SUMMARY
 
+> ## ⚠️ DOKUMEN INI SUDAH BISA DEPRECATE — BACA `HANDOFF.md` DULU
+>
+> Audit ini selesai **2026-08-01** dengan hasil 25 PASS / 0 FAIL. Itu status
+> **pada saat itu saja**. Codecov terus bergerak dan sejak itu sudah ada
+> banyak perubahan besar yang tidak tercermin di sini:
+>
+> - Test suite 92 → **237** tes.
+> - Track A punya **walk-forward CV** (`src/track_a_cv.py`) dan sekarang
+>   angka Track A di `cv_model_selection.csv` **out-of-sample**, bukan
+>   in-sample. **Goal-model produksi flip dari Dixon-Coles ke Poisson.**
+> - `evaluation_summary.csv` punya skema stabil 8 baris + kolom `available`.
+> - Ada eksperimen baru di `research/`.
+>
+> **Sumber kebenaran saat ini adalah `HANDOFF.md`.** Dokumen ini dipakai
+> sebagai catatan historis hanya. Kalau ada konflik antara dokumen ini dan
+> `HANDOFF.md`, `HANDOFF.md` yang benar.
+
 **Project:** Football Predictive Analysis (EPL)  
 **Date:** 2026-08-01  
 **Audit mode:** COMPLETE ✅  

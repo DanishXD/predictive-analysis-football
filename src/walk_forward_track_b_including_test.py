@@ -1,20 +1,37 @@
-"""Walk-forward (expanding window) validation — 6 seasonal folds.
+"""Walk-forward (expanding window) validation Track B — 6 fold, INCLUDING test season.
 
-Menggantikan evaluasi single-split dengan 6 periode out-of-sample yang
-independen. Setiap fold menambah satu musim ke training set (expanding window),
-sehingga mengukur robustness model di berbagai kondisi musim.
+Module ini evaluating robustness model KLASIFIKASI Track B (Logistic
+Regression, Random Forest, XGBoost) di 6 periode out-of-sample yang
+independen. Setiap fold menambah satu musim ke training set (expanding
+window).
 
-Fold design:
-  Fold 1: Train 2016-17 → 2019-20, Test 2020-21
-  Fold 2: Train 2016-17 → 2020-21, Test 2021-22
-  Fold 3: Train 2016-17 → 2021-22, Test 2022-23
-  Fold 4: Train 2016-17 → 2022-23, Test 2023-24
-  Fold 5: Train 2016-17 → 2023-24, Test 2024-25
-  Fold 6: Train 2016-17 → 2024-25, Test 2025-26  ← sama dengan single-split baseline
+  Fold design:
+    Fold 1: Train 2016-17 -> 2019-20, Validasi 2020-21
+    Fold 2: Train 2016-17 -> 2020-21, Validasi 2021-22
+    Fold 3: Train 2016-17 -> 2021-22, Validasi 2022-23
+    Fold 4: Train 2016-17 -> 2022-23, Validasi 2023-24
+    Fold 5: Train 2016-17 -> 2023-24, Validasi 2024-25
+    Fold 6: Train 2016-17 -> 2024-25, Validasi 2025-26  <-- TEST_SEASON
+
+NAMA FILE MENYERUPAI MODUL LAIN, BEDAKAN DENGAN SERIUS:
+    src/track_a_cv.py
+        5 fold, model Track A (Poisson/Dixon-Coles/Elo), season training
+        saja. INI YANG DIPAKAI untuk model selection di evaluate.py.
+    modul ini
+        6 fold, model Track B, dan fold 6 memakai season yang sama dengan
+        TEST_SEASON. Hanya untuk PELAPORAN variasi antar musim, bukan untuk
+        memilih model: memakai fold 6 sama dengan melihat test set.
+        Angka fold 1-5 pun tidak sebanding langsung dengan TimeSeriesSplit
+        5-fold di Track B, karena training window dan batasannya beda.
 
 Output:
-  data/processed/walk_forward_results.csv  — per-fold metrics
-  data/processed/walk_forward_summary.csv  — mean ± std aggregated
+  data/processed/walk_forward_track_b_including_test_results.csv
+  data/processed/walk_forward_track_b_including_test_summary.csv
+
+Dulu modul ini bernama ``walk_forward.py`` dan hanya berisi fungsi
+``run_walk_forward()`` di ``track_a_cv.py`` dan ``exposure_poisson.py``.
+Nama lamanya tidak membedakan keduanya, padahal perilakunya berlawanan soal
+test season.
 """
 
 from __future__ import annotations
@@ -34,11 +51,13 @@ from config import (
 )
 from train_model import build_models, load_modeling_data
 
-RESULTS_PATH = PROCESSED_DIR / "walk_forward_results.csv"
-SUMMARY_PATH = PROCESSED_DIR / "walk_forward_summary.csv"
+RESULTS_PATH = PROCESSED_DIR / "walk_forward_track_b_including_test_results.csv"
+SUMMARY_PATH = PROCESSED_DIR / "walk_forward_track_b_including_test_summary.csv"
 
-# Minimal seasons untuk training — fold 1 mulai dari 2020-21 sebagai test
-# artinya minimal 4 seasons train (2016-17, 2017-18, 2018-19, 2019-20).
+# 6 fold; fold terakhir sengaja memakai TEST_SEASON, jadi output modul ini
+# hanya untuk pelaporan dan tidak boleh dipakai untuk model selection.
+# Bandingkan dengan WALK_FORWARD_FOLDS di src/track_a_cv.py (5 fold,
+# season training saja) yang justru dipakai evaluate.py.
 WALK_FORWARD_FOLDS = [
     # (last_train_season, test_season)
     ("2019-2020", "2020-2021"),

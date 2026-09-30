@@ -357,7 +357,36 @@ melatih meta-learner, dan `blend_meta` di fold itu 1.045805 vs simple average
 1.003654. Exclusion fold 2 menaikkan simple_average ke 0.971250 dan
 blend_meta ke 0.973758, tapi urutan relatif tidak berubah.
 
-### 5.10 Jarak ke odds bandar setelah 4 minggu perbaikan
+### 5.10 Stacking (Random Forest + XGBoost) - `src/stacking.py`
+
+Meta-learner logistic regression di atas probabilitas out-of-fold RF + XGB.
+Pel Patrice scored sedikit lebih baik dari masing-masing base model, jadi
+idenya masuk akal secara teori. Di train/test season ini **justru lebih
+buruk di kedua tempat**:
+
+| metrik | RF + XGB baseline | stacked | delta |
+|---|---|---|---|
+| CV log loss | 0.984091 | 0.989173 | **+0.005082** |
+| test log loss | 1.035149 | 1.040039 | **+0.004890** |
+
+Delta test `-0.004890` dengan bootstrap 95% CI `[-0.016272, +0.006570]` —
+intervalnya melintasi nol, jadi peningkatannya tidak significant, tapi arahnya
+konsisten: lebih buruk, tidak pernah lebih baik.
+
+Diagnosis: RF dan XGBoost sudah sangat mirip (garda di test season hanya
+0.0021 log loss, dan di §5.6 upanya sendiri tidak berhasil), jadi stacking
+cuma menambah parameter yang dilatih pada data terlalu sedikit tanpa menambah
+sumber informasi baru. Persis masalah yang sama seperti §5.9.
+
+Efek samping yang nyata: `stacking.py` menulis
+`data/processed/stacking_test_predictions.csv`, yang jadi **satu-satunya**
+alasan baris `random_forest_stacked_xg` pernah hilang dari
+`evaluation_summary.csv`. Karena itu skema summary sudah distabilkan di
+commit `9ed3bb4`: selalu 8 baris, dengan `available=False` + `NaN` kalau
+file itu belum ada. Jalankan `stacking.py` kalau memang mau melihat angka
+nya; jangan absence-nya disalahartikan sebagai "model ini kalah".
+
+### 5.11 Jarak ke odds bandar setelah 4 minggu perbaikan
 
 Ini jawaban langsung atas pertanyaan "seberapa dekat ke bandar dibanding
 sebelum semua perbaikan dimulai". Angka "sebelum" dari capture pre-upgrade di
@@ -373,11 +402,12 @@ bookmaker RPS 0.205, log loss 1.015).
 Gap SEBELUM: log loss +0.021000, RPS +0.006000.
 
 **Kesimpulan jujur: empat minggu kerja tidak memperkecil jarak ke bandar sama
-sekali — jaraknya justru sedikit melebar (+0.0013 log loss).** Dari 7
-eksperimen, hanya exposure-based SOT yang signifikan, dan itu baru terbukti di
-CV training season, belum diuji di test season. Sisanya (§5.1-§5.7) gagal.
+sekali — jaraknya justru sedikit melebar (+0.0013 log loss).** Dari semua
+eksperimen di §5, hanya exposure-based Poisson (§5.8) yang menunjukkan
+peningkatan signifikan, dan itu baru terbukti di CV training season, belum diuji
+di test season. Sisanya gagal atau tidak significant.
 
-### 5.11 Yang TIDAK berhasil dan tidak dicoba lagi
+### 5.12 Yang TIDAK berhasil dan tidak dicoba lagi
 - Eksclude musim 2020/21 dari training (membuang data, tidak sesuai scope)
 - Menambah fitur wasit sebagai kategorikal langsung (Poisson penaltyblog hanya support
   param per-tim + home advantage, bukan kategorikal)
@@ -385,6 +415,7 @@ CV training season, belum diuji di test season. Sisanya (§5.1-§5.7) gagal.
 - Blend meta-learner di atas seluruh base model (lihat §5.9) — menang di CV
   tapi tidak transfer ke test season.
 - Rata-rata aritmetik semua base model tanpa bobot (§5.9)
+- Stacking RF + XGB (§5.10) — RF dan XGB terlalu mirip untuk di-stacking.
 
 ---
 
@@ -476,12 +507,15 @@ tidak significant. Keputusan: **jangan dijadikan fitur produksi**, HFA global te
 
 ## 8. Koordinasi dengan sesi lain
 
-File berikut **milik sesi/agent lain yang jalan paralel**. Jangan disentuh atau
-di-overwrite:
+`research/` dan `src/walk_forward_track_b_including_test.py` (dulu
+`src/walk_forward.py`) berasal dari sesi/agent paralel, sekarang sudah
+ter-commit. Nama modul sudah diubah supaya tidak tertukar dengan
+`src/track_a_cv.py`: yang ini 6 fold dan **memakai** `TEST_SEASON` sebagai
+fold terakhir, jadi hanya untuk pelaporan, bukan model selection.
 
 ```
 research/                              # jurnal riset, audit trail (AUDIT-0001, JOURNAL.md)
-src/walk_forward.py                    # modul walk-forward
+src/walk_forward_track_b_including_test.py  # walk-forward Track B, 6 fold, termasuk test season
 data/metadata/dataset_metadata.json    # provenance dataset
 ```
 
