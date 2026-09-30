@@ -21,14 +21,30 @@ Semua dijalankan dari root project dengan interpreter venv:
 .venv\Scripts\python.exe src\feature_engineering.py    # Fase 3: fitur anti-leakage
 .venv\Scripts\python.exe src\statistical_models.py     # Fase 4: Poisson, Dixon-Coles, Elo
 .venv\Scripts\python.exe src\train_model.py            # Fase 5: LogReg/RF/XGBoost
+.venv\Scripts\python.exe src\track_a_cv.py             # Fase 6: walk-forward CV Track A (WAJIB)
 .venv\Scripts\python.exe src\evaluate.py               # Fase 7: evaluasi semua model vs odds
 .venv\Scripts\python.exe src\predict_match.py          # Fase 9: CLI prediksi interaktif
 ```
 
+**Fase 6 (`src/track_a_cv.py`) wajib, bukan opsional.** Output-nya
+(`data/processed/track_a_cv_results.csv`) adalah sumber angka Track A di
+`cv_model_selection.csv`. Kalau dilewati, `evaluate.py` jatuh ke angka
+**in-sample** yang tidak sebanding dengan Track B dan bisa memilih goal model
+yang berbeda — CLI lalu diam-diam memakai Dixon-Coles alih-alih Poisson.
+`evaluate.py` akan mencetak peringatan eksplisit kalau file ini belum ada, dan
+menolak file yang fold-nya sudah tidak cocok dengan `config.SEASONS` /
+`config.TEST_SEASON` (artinya `TEST_SEASON` berubah tapi Fase 6 tidak diulang).
+`data/processed/` di-gitignore, jadi di mesin baru file ini selalu hilang
+sampai Fase 6 dijalankan.
+
+HATI-HATI: `src/walk_forward_track_b_including_test.py` BUKAN pengganti Fase 6.
+Modul itu 6 fold dan fold terakhirnya memakai `TEST_SEASON`, jadi hanya untuk
+pelaporan dan tidak boleh dipakai untuk model selection.
+
 Opsional: `src/stacking.py`, `src/corner_model.py`, `src/discipline_model.py`, `src/value_betting.py`.
 
 Eksperimen (tidak mengubah model produksi, tidak mengubah `cv_model_selection.csv`):
-`src/model_calibration.py`, `src/model_tuning.py`, `src/track_a_cv.py`,
+`src/model_calibration.py`, `src/model_tuning.py`,
 `src/exposure_poisson.py`, `src/blend.py`, `src/seasonal_hfa.py`.
 Hasil negatif yang sudah tercatat ada di `HANDOFF.md` bagian 5 — baca dulu sebelum
 mencoba pendekatan yang sama lagi.
@@ -53,7 +69,11 @@ Jalankan tes setiap kali ubah apapun di `src/`, terutama:
 
 ## Mengganti test season
 1. Ubah `TEST_SEASON` di `src/config.py` (satu tempat saja).
-2. Jalankan ulang Fase 1 → 3 → 4 → 5 → 7.
+2. Jalankan ulang Fase 1 → 3 → 4 → 5 → **6** → 7. Fase 6 wajib diulang juga:
+   `track_a_cv.py` menghitung fold-nya dari `config.SEASONS`, jadi mengganti
+   `TEST_SEASON` membuat fold di `track_a_cv_results.csv` yang tertinggal tidak
+   lagi valid. Kalau lupa, `evaluate.py` menolaknya dengan pesan fold stale,
+   bukan diam-diam memakai angka training period lama.
 3. Cek output warning staleness dari `predict_match.py`.
 
 ## Known limitations (jangan "perbaiki" tanpa diskusi)

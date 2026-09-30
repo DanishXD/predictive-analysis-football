@@ -17,7 +17,8 @@ Scope dan keputusan teknis lengkap (termasuk alasan di balik setiap pilihan meto
   - [Fase 3: Feature Engineering](#fase-3-feature-engineering)
   - [Fase 4: Track A — Model Statistik](#fase-4-track-a--model-statistik)
   - [Fase 5: Track B — Model Machine Learning](#fase-5-track-b--model-machine-learning)
-  - [Fase 6: Stacking (Opsional)](#fase-6-stacking-opsional)
+  - [Fase 6: Walk-Forward CV Track A (Wajib)](#fase-6-walk-forward-cv-track-a-wajib)
+  - [Fase 6b: Stacking (Opsional)](#fase-6b-stacking-opsional)
   - [Fase 7: Evaluasi Menyeluruh](#fase-7-evaluasi-menyeluruh)
   - [Fase 8: Value Betting Testing](#fase-8-value-betting-testing)
   - [Fase 9: Interactive Match Predictor](#fase-9-interactive-match-predictor)
@@ -29,7 +30,7 @@ Scope dan keputusan teknis lengkap (termasuk alasan di balik setiap pilihan meto
   - [Fase 17: Audit Menyeluruh](#fase-17-audit-menyeluruh)
   - [Fase 18: Koreksi Output Probability (Eksperimen)](#fase-18-koreksi-output-probability-eksperimen)
   - [Fase 19: Hyperparameter Tuning (Eksperimen)](#fase-19-hyperparameter-tuning-eksperimen)
-  - [Eksperimen Track A: Walk-Forward CV](#eksperimen-track-a-walk-forward-cv)
+  - [Walk-Forward CV Track A](#fase-6-walk-forward-cv-track-a-wajib)
   - [Eksperimen Exposure-Based Poisson (bukan xG)](#eksperimen-exposure-based-poisson-bukan-xg)
   - [Eksperimen Blend Sistematis (semua model)](#eksperimen-blend-sistematis-semua-model)
   - [Eksperimen Seasonal HFA](#eksperimen-seasonal-hfa)
@@ -61,7 +62,7 @@ football-predictive-analysis/
 │   ├── value_betting.py        # Fase 8
 │   ├── model_calibration.py    # Fase 18 (eksperimen — hasil negatif)
 │   ├── model_tuning.py         # Fase 19 (eksperimen)
-│   ├── track_a_cv.py           # eksperimen walk-forward CV Track A
+│   ├── track_a_cv.py           # Fase 6 (WAJIB) — walk-forward CV Track A, sumber angka selection
 │   ├── exposure_poisson.py     # eksperimen exposure-based Poisson (bukan xG)
 │   ├── blend.py                # eksperimen blend semua model (hasil negatif)
 │   ├── seasonal_hfa.py         # eksperimen HFA musim no-fans (hasil negatif)
@@ -157,7 +158,57 @@ menangani kelas Draw (minoritas), tetapi di-revert karena RPS lebih diprioritask
 python src/train_model.py
 ```
 
-### Fase 6: Stacking (Opsional)
+### Fase 6: Walk-Forward CV Track A (Wajib)
+
+Menghitung metrik **out-of-sample** untuk Track A (Poisson, Dixon-Coles, Elo)
+lewat walk-forward musiman: 5 fold expanding-window dengan season validasi
+2020-2021 s.d. 2024-2025. `TEST_SEASON` tidak pernah dipakai sebagai fold.
+
+Output `data/processed/track_a_cv_results.csv` dibaca `evaluate.py` untuk
+mengisi angka Track A di `cv_model_selection.csv`. **Wajib**, karena kalau
+dilewati `evaluate.py` jatuh ke angka in-sample yang tidak sebanding dengan
+Track B dan bisa memilih goal model yang berbeda.
+
+```powershell
+python src/track_a_cv.py
+```
+
+Alasan modul ini ada: angka Track A di `cv_model_selection.csv` dulu
+dihitung **in-sample** (model dievaluasi di data yang sama dengan data
+latihnya), sedangkan angka Track B di tabel yang sama berasal dari
+TimeSeriesSplit out-of-fold. Modul ini menghasilkan angka yang benar-benar
+sebanding.
+
+```text
+model          LogLoss       RPS      Acc
+poisson       1.103723  0.243066  0.4489
+dixon_coles   1.105310  0.243113  0.4479
+elo           1.106281  0.241574  0.4616
+```
+
+Dixon-Coles tidak memberi peningkatan bermakna di luar sampel (paired per
+fold: `+0.001586` log loss, hanya 1 dari 5 fold membaik) — konsisten dengan
+`rho ~ -0.004` yang sudah dicatat sebagai limitation.
+
+`evaluate.py` menolak file yang fold-nya tidak lagi cocok dengan
+`config.SEASONS` / `config.TEST_SEASON`, jadi mengganti `TEST_SEASON` tanpa
+menjalankan ulang fase ini akan berhenti dengan pesan jelas, bukan diam-diam
+memakai angka training period lama.
+
+> **Goal-model produksi: Poisson.** Angka in-sample lama memberi Dixon-Coles
+> selisih `0.000002`, itu noise; out-of-sample selisihnya `0.001586` dan
+> konsisten di 5 fold. Lihat [`HANDOFF.md`](./HANDOFF.md) §2.1. Track B tidak
+> berubah: XGBoost tetap model klasifikasi terbaik.
+>
+> Catatan: Elo di modul ini tanpa cold-start ClubElo (semua tim mulai dari
+> 1500) supaya deterministik dan tidak memanggil API luar yang bisa rate-limit.
+> Jadi angka Elo di sini tidak langsung sebanding dengan Elo produksi.
+
+> Jangan tertukar dengan `src/walk_forward_track_b_including_test.py`: itu
+> Track B, 6 fold, dan fold terakhirnya memakai `TEST_SEASON`, jadi hanya
+> untuk pelaporan.
+
+### Fase 6b: Stacking (Opsional)
 
 Menambahkan expected goals dari Poisson **dan** Dixon-Coles sebagai fitur tambahan
 ke Random Forest (Elo rating gap sudah jadi fitur dasar sejak Fase 5). Percobaan
@@ -396,44 +447,6 @@ dengan 95% CI [-0.000327, +0.000874] -> tidak signifikan.
 
 > **Hasil negatif — jangan diulang.** Detail lengkap di
 > [`HANDOFF.md`](./HANDOFF.md) bagian 5.
-
-### Eksperimen Track A: Walk-Forward CV
-
-```powershell
-python src/track_a_cv.py
-```
-
-Menghitung metrik **out-of-sample** untuk Track A (Poisson, Dixon-Coles, Elo)
-lewat walk-forward musiman: 5 fold expanding-window dengan season validasi
-2020-2021 s.d. 2024-2025. `TEST_SEASON` tidak pernah dipakai sebagai fold.
-
-Alasan modul ini ada: angka Track A di `cv_model_selection.csv` dulu
-dihitung **in-sample** (model dievaluasi di data yang sama dengan data
-latihnya), sedangkan angka Track B di tabel yang sama berasal dari
-TimeSeriesSplit out-of-fold. Modul ini menghasilkan angka yang benar-benar
-sebanding.
-
-```text
-model          LogLoss       RPS      Acc
-poisson       1.103723  0.243066  0.4489
-dixon_coles   1.105310  0.243113  0.4479
-elo           1.106281  0.241574  0.4616
-```
-
-Dixon-Coles tidak memberi peningkatan bermakna di luar sampel (paired per
-fold: `+0.001586` log loss, hanya 1 dari 5 fold membaik) — konsisten dengan
-`rho ~ -0.004` yang sudah dicatat sebagai limitation.
-
-> **Status: sudah disambungkan (30 September 2026).** `evaluate.py` membaca
-> `data/processed/track_a_cv_results.csv` dan memakai angka di atas untuk
-> selection Track A, dengan guard keras yang menolak file bila ada fold
-> dengan `validation_season == TEST_SEASON`. Konsekuensinya **goal-model
-> produksi flip dari Dixon-Coles ke Poisson** — see `HANDOFF.md` §2.1.
-> Track B tidak berubah.
->
-> Catatan: Elo di modul ini tanpa cold-start ClubElo (semua tim mulai dari
-> 1500) supaya deterministik dan tidak memanggil API luar yang bisa rate-limit.
-> Jadi angka Elo di sini tidak langsung sebanding dengan Elo produksi.
 
 ### Eksperimen Exposure-Based Poisson (bukan xG)
 

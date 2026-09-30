@@ -891,12 +891,23 @@ def _load_track_a_walk_forward() -> dict[str, dict]:
     Sengaja membaca ``track_a_cv_results.csv`` (per fold) dan bukan
     ``track_a_cv_summary.csv`` (agregat), supaya season validasi tiap fold
     bisa diperiksa langsung. File agregat tidak menyimpan kolom season, jadi
-    guard kontaminasi test season tidak akan bisa diverifikasi darinya.
+    guard kontaminasi dan guard staleness tidak akan bisa diverifikasi
+    darinya.
+
+    Dua guard keras di sini:
+
+    1. **Kontaminasi test season.** Baris dengan ``validation_season ==
+       TEST_SEASON`` ditolak.
+    2. **Staleness.** Fold di file harus persis sama dengan ``build_folds()``
+       yang di-derive ulang dari ``config.SEASONS`` saat ini. Tanpa ini,
+       mengganti ``TEST_SEASON`` tanpa menjalankan ulang ``track_a_cv.py``
+       akan diam-diam memakai angka dari training period yang salah, karena
+       guard pertama tidak memicu saat ``TEST_SEASON`` baru tidak ada di set
+       fold lama (yaitu kasus normal, test season selalu yang terbaru).
 
     Kalau file per-fold belum ada, dikembalikan dict kosong supaya
     evaluate.py jatuh ke jalur in-sample dengan ``selection_basis`` yang
-    jujur. Test season tidak boleh pernah jadi fold di sini; kalau iya,
-    itu error keras, bukan diasumsikan aman.
+    jujur; pemanggil wajib memberi tahu pemanggil lain soal itu.
     """
     if not TRACK_A_CV_RESULTS_PATH.exists():
         return {}
@@ -906,6 +917,7 @@ def _load_track_a_walk_forward() -> dict[str, dict]:
         "model",
         "fold",
         "validation_season",
+        "last_train_season",
         "log_loss",
         "accuracy",
     }
@@ -920,6 +932,8 @@ def _load_track_a_walk_forward() -> dict[str, dict]:
             "Angka Track A untuk model selection harus out-of-sample di "
             "training season saja."
         )
+
+    _assert_track_a_folds_current(results)
 
     rows = {}
     for model, group in results.groupby("model"):
@@ -939,6 +953,39 @@ def _load_track_a_walk_forward() -> dict[str, dict]:
     return rows
 
 
+def _assert_track_a_folds_current(results: pd.DataFrame) -> None:
+    """Tolak fold Track A yang tidak lagi cocok dengan config saat ini.
+
+    ``track_a_cv.py`` tidak me-hardcode fold; ``build_folds()`` menghitungnya
+    dari ``config.SEASONS`` dan ``config.TEST_SEASON``. Jadi kalau ``TEST_SEASON``
+    berubah tanpa menjalankan ulang ``track_a_cv.py``, file hasil yang tertinggal
+    punya fold untuk season yang sudah tidak lagi relevan. Numbers-nya tetap
+    terlihat valid karena bentuk CSV-nya sama persis, jadi harus dicek isinya.
+    """
+    from track_a_cv import build_folds
+
+    expected = {
+        (fold.last_train_season, fold.validation_season) for fold in build_folds()
+    }
+    actual = set(
+        results[["last_train_season", "validation_season"]]
+        .drop_duplicates()
+        .itertuples(index=False, name=None)
+    )
+    if actual == expected:
+        return
+
+    stale = sorted(actual - expected)
+    missing = sorted(expected - actual)
+    raise ValueError(
+        "track_a_cv_results.csv tidak cocok dengan config.SEASONS/TEST_SEASON "
+        f"saat ini (TEST_SEASON={TEST_SEASON}). Jalankan ulang "
+        "`.venv\\Scripts\\python.exe src\\track_a_cv.py` sebelum evaluate.py. "
+        f"fold di file tapi tidak diharapkan: {stale}. "
+        f"fold diharapkan tapi tidak ada di file: {missing}."
+    )
+
+
 def _track_a_selection_metrics() -> pd.DataFrame:
     """Hitung log loss & accuracy Track A pada data TRAINING saja.
 
@@ -954,8 +1001,24 @@ def _track_a_selection_metrics() -> pd.DataFrame:
 
     Test metrics sengaja tidak dipakai: memakai test set untuk memilih model
     justru kontaminasi yang dihindari dalam model selection.
+
+    Jalur in-sample bukan kondisi setara, dan hasilnya perlu diperlakukan
+    begini: angka itu TIDAK sebanding dengan Track B out-of-fold dan bisa
+    memilih goal model yang berbeda. Jadi kalau dipakai, hasilnya dicetak
+    peringatan eksplisit, bukan diam-diam.
     """
     walk_forward = _load_track_a_walk_forward()
+    if not walk_forward:
+        print(
+            "\n" + "!" * 78 + "\n"
+            "PERINGATAN: angka Track A memakai IN-SAMPLE, bukan out-of-sample.\n"
+            f"File {TRACK_A_CV_RESULTS_PATH.name} tidak ditemukan, jadi angka\n"
+            "Poisson/Dixon-Coles/Elo dievaluasi di data yang sama dengan data\n"
+            "latihnya. Angka ini TIDAK sebanding dengan Track B (out-of-fold) dan\n"
+            "dapat memilih goal model yang berbeda.\n"
+            "Jalankan `.venv\\Scripts\\python.exe src\\track_a_cv.py` lebih dulu\n"
+            "supaya model selection memakai walk-forward CV yang benar.\n" + "!" * 78
+        )
     train = _train_rows()
     y_true = train["result"].map(TARGET_MAPPING).to_numpy()
     rows = []

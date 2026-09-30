@@ -18,12 +18,22 @@ import pandas as pd
 import pytest
 
 import evaluate
-from evaluate import _load_track_a_walk_forward
+import track_a_cv
+from evaluate import _assert_track_a_folds_current, _load_track_a_walk_forward
+
+LAST_TRAIN = [
+    "2019-2020",
+    "2020-2021",
+    "2021-2022",
+    "2022-2023",
+    "2023-2024",
+]
 
 FOLD_RESULTS = pd.DataFrame(
     {
         "model": ["poisson"] * 5 + ["dixon_coles"] * 5 + ["elo"] * 5,
         "fold": list(range(1, 6)) * 3,
+        "last_train_season": LAST_TRAIN * 3,
         "validation_season": [
             "2020-2021",
             "2021-2022",
@@ -194,3 +204,81 @@ def test_full_track_a_ranking_is_locked():
     results = pd.read_csv(evaluate.TRACK_A_CV_RESULTS_PATH)
     means = results.groupby("model")["log_loss"].mean().sort_values()
     assert list(means.index) == ["poisson", "dixon_coles", "elo"]
+
+
+# --------------------------------------------------------------------------
+# Guard staleness
+# --------------------------------------------------------------------------
+
+
+def _expected_folds() -> set[tuple[str, str]]:
+    return {
+        (fold.last_train_season, fold.validation_season)
+        for fold in track_a_cv.build_folds()
+    }
+
+
+def test_current_file_matches_config_folds():
+    results = pd.read_csv(evaluate.TRACK_A_CV_RESULTS_PATH)
+    assert _assert_track_a_folds_current(results) is None
+
+
+def test_stale_fold_count_is_rejected(results_file):
+    """Kasus utama: TEST_SEASON bergeser, jumlah fold berubah."""
+    results_file.write_text("", encoding="utf-8")  # pastikan ada file
+    stale = FOLD_RESULTS[FOLD_RESULTS["validation_season"] != "2024-2025"]
+    stale.to_csv(results_file, index=False)
+    with pytest.raises(ValueError, match="tidak cocok dengan config"):
+        _assert_track_a_folds_current(stale)
+
+
+def test_extra_fold_is_rejected(results_file):
+    """Fold nyasar di file tapi tidak lagi diharapkan ikut ditolak."""
+    extra = pd.concat(
+        [
+            FOLD_RESULTS,
+            pd.DataFrame(
+                {
+                    "model": ["poisson"],
+                    "fold": [6],
+                    "last_train_season": ["2024-2025"],
+                    "validation_season": ["2025-2026"],
+                    "log_loss": [1.05],
+                    "accuracy": [0.50],
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+    with pytest.raises(ValueError, match="tidak cocok dengan config"):
+        _assert_track_a_folds_current(extra)
+
+
+def test_staleness_guard_fires_when_old_guard_would_not(monkeypatch):
+    """Guard baru harus menutup gap yang guard test-season tidak trembus.
+
+    Kalau hanya ``config.SEASONS`` berubah (musim ditambah atau dipotong)
+    tanpa mengubah ``TEST_SEASON``, tidak ada baris dengan
+    ``validation_season == TEST_SEASON`` sehingga guard pertama diam. Tapi
+    angka di file jadi dihitung dari training period yang salah.
+    """
+    stale = FOLD_RESULTS.copy()
+    original = list(track_a_cv.SEASONS)
+    try:
+        track_a_cv.SEASONS = sorted(set(original) - {"2016-2017"})
+        assert not (stale["validation_season"] == track_a_cv.TEST_SEASON).any()
+        with pytest.raises(ValueError, match="tidak cocok dengan config"):
+            _assert_track_a_folds_current(stale)
+    finally:
+        track_a_cv.SEASONS = original
+
+
+def test_error_message_names_the_fix():
+    stale = FOLD_RESULTS[FOLD_RESULTS["validation_season"] != "2024-2025"]
+    with pytest.raises(ValueError) as excinfo:
+        _assert_track_a_folds_current(stale)
+    message = str(excinfo.value)
+    assert "src\\track_a_cv.py" in message
+    assert "TEST_SEASON=" in message
+    # Pesan harus menyebut fold mana yang stale dan mana yang hilang.
+    assert "2024-2025" in message
