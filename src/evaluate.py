@@ -435,7 +435,14 @@ def run_bootstrap_evaluation(
     """
     print(f"\nMenghitung bootstrap CIs ({BOOTSTRAP_SAMPLES} samples)...")
     ci_rows = []
-    available_models = [m for m in MODEL_ORDER if m in summary["model"].values]
+    # Hanya model yang benar-benar punya prediksi. Baris summary untuk model
+    # yang tidak tersedia tetap ikut ditulis (dengan NaN) supaya skema
+    # evaluation_summary_with_ci.csv juga stabil.
+    available_models = [
+        m
+        for m in MODEL_ORDER
+        if m in summary.loc[summary["available"], "model"].values
+    ]
 
     for model in available_models:
         model_data = predictions.loc[predictions["model"] == model]
@@ -486,23 +493,97 @@ def run_bootstrap_evaluation(
     return ci_summary, comparison
 
 
+def _unavailable_summary_row(model: str) -> dict:
+    """Baris summary untuk model yang prediksinya tidak tersedia.
+
+    Dipakai supaya skema ``evaluation_summary.csv`` stabil: file selalu punya
+    satu baris per model di ``MODEL_ORDER``, dengan ``available=False`` dan
+    metrik NaN kalau artefaknya belum ada.
+    """
+    return {
+        "model": model,
+        "track": MODEL_TRACKS[model],
+        "accuracy": np.nan,
+        "log_loss": np.nan,
+        "brier_score": np.nan,
+        "rps": np.nan,
+        "mean_ece": np.nan,
+        "draw_predictions": np.nan,
+        "draw_recall": np.nan,
+        "available": False,
+        "unavailable_reason": "prediksi tidak ditemukan; jalankan skripnya dulu",
+    }
+
+
+def _unavailable_class_rows(model: str) -> list[dict]:
+    """Baris per-kelas kosong untuk model yang tidak tersedia."""
+    return [
+        {
+            "model": model,
+            "track": MODEL_TRACKS[model],
+            "class": class_name,
+            "precision": np.nan,
+            "recall": np.nan,
+            "f1": np.nan,
+            "support": 0,
+            "predicted_count": 0,
+        }
+        for class_name in CLASS_NAMES
+    ]
+
+
+def _unavailable_confusion_row(model: str) -> list[dict]:
+    """Baris confusion matrix kosong untuk model yang tidak tersedia."""
+    return [
+        {
+            "model": model,
+            "actual_class": actual_name,
+            "predicted_class": predicted_name,
+            "count": 0,
+        }
+        for actual_name in CLASS_NAMES
+        for predicted_name in CLASS_NAMES
+    ]
+
+
 def evaluate_predictions(
     predictions: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Calculate overall, per-class, and confusion-matrix metrics."""
+    """Calculate overall, per-class, and confusion-matrix metrics.
+
+    Skema output dijaga STABIL: satu baris per model di ``MODEL_ORDER``,
+    apa pun file opsional yang kebetulan ada. Model yang prediksinya tidak
+    tersedia (misal ``random_forest_stacked_xg`` sebelum ``stacking.py``
+    pernah dijalankan) tetap dapat barisnya dengan ``available=False`` dan
+    metrik ``NaN``.
+
+    Sebelumnya baris hanya dibuat untuk model yang punya data, jadi jumlah
+    baris ``evaluation_summary.csv`` berubah dari 7 jadi 8 tergantung
+    ``stacking.py`` sudah dijalankan atau belum. Artefak "canonical" Fase 7
+    jadi tidak reproducible di mesin berbeda tanpa error apa pun.
+    """
     summary_rows = []
     class_rows = []
     confusion_rows = []
 
-    # Only evaluate models that actually have predictions
-    available_models = predictions["model"].unique()
-    models_to_evaluate = [m for m in MODEL_ORDER if m in available_models]
+    available_models = set(predictions["model"].unique())
 
-    for model in models_to_evaluate:
+    for model in MODEL_ORDER:
+        if model not in available_models:
+            summary_rows.append(_unavailable_summary_row(model))
+            # extend, bukan append: class_rows/confusion_rows dikumpulkan
+            # sebagai list of dict yang diratakan jadi DataFrame di akhir.
+            class_rows.extend(_unavailable_class_rows(model))
+            confusion_rows.extend(_unavailable_confusion_row(model))
+            continue
+
         model_data = predictions.loc[predictions["model"] == model]
-        
+
         # Skip if no data for this model
         if len(model_data) == 0:
+            summary_rows.append(_unavailable_summary_row(model))
+            class_rows.extend(_unavailable_class_rows(model))
+            confusion_rows.extend(_unavailable_confusion_row(model))
             continue
             
         y_true = model_data["result"].map(TARGET_MAPPING).to_numpy()
@@ -529,6 +610,8 @@ def evaluate_predictions(
                 "mean_ece": expected_calibration_error(probabilities, y_true),
                 "draw_predictions": int((y_pred == TARGET_MAPPING["D"]).sum()),
                 "draw_recall": recall[TARGET_MAPPING["D"]],
+                "available": True,
+                "unavailable_reason": "",
             }
         )
 
@@ -556,7 +639,13 @@ def evaluate_predictions(
                     }
                 )
 
-    summary = pd.DataFrame(summary_rows).sort_values("rps", ignore_index=True)
+    summary = pd.DataFrame(summary_rows)
+    # NaN selalu menduduki akhir saat sort, jadi model yang tidak tersedia
+    # tidak pernah mendominasi urutan. available diurutkan lebih dulu supaya
+    # model yang bisa dinilai muncul di atas.
+    summary = summary.sort_values(
+        ["available", "rps"], ascending=[False, True], ignore_index=True
+    )
     return summary, pd.DataFrame(class_rows), pd.DataFrame(confusion_rows)
 
 
@@ -655,10 +744,16 @@ def validate_outputs(
     summary: pd.DataFrame,
     class_metrics: pd.DataFrame,
 ) -> None:
-    """Validate complete model coverage and probability invariants."""
+    """Validate complete model coverage and probability invariants.
+
+    ``summary`` dan ``class_metrics`` diekspektasikan punya baris untuk SETIAP
+    model di ``MODEL_ORDER``, termasuk yang prediksinya tidak tersedia. Baris
+    seperti itu ditandai ``available=False`` dengan metrik NaN, dan NaN
+    legitimate di sana. Karena itu pengecekan NaN hanya dijalankan pada baris
+    yang tersedia.
+    """
     errors = []
     
-    # Dynamic model count (only models actually present)
     actual_models = predictions["model"].unique()
     expected_rows = len(base) * len(actual_models)
     
@@ -671,12 +766,33 @@ def validate_outputs(
     probability_sum = predictions[["prob_home", "prob_draw", "prob_away"]].sum(axis=1)
     if not np.allclose(probability_sum, 1.0, atol=1e-7):
         errors.append("probabilitas tidak berjumlah satu")
-    if set(summary["model"]) != set(actual_models):
-        errors.append(f"summary tidak mencakup semua model (expected {len(actual_models)}, got {len(summary)})")
-    if len(class_metrics) != len(actual_models) * 3:
-        errors.append(f"class metrics tidak lengkap (expected {len(actual_models)*3}, got {len(class_metrics)})")
-    if not summary[["accuracy", "brier_score", "rps", "mean_ece"]].ge(0).all().all():
+
+    # Skema summary harus stabil: satu baris per model terdaftar, tidak
+    # bergantung pada file opsional mana yang kebetulan ada.
+    if set(summary["model"]) != set(MODEL_ORDER):
+        missing = sorted(set(MODEL_ORDER) - set(summary["model"]))
+        extra = sorted(set(summary["model"]) - set(MODEL_ORDER))
+        errors.append(
+            f"skema summary harus mencakup semua {len(MODEL_ORDER)} model "
+            f"(missing={missing}, extra={extra})"
+        )
+    if len(summary) != len(MODEL_ORDER):
+        errors.append(f"summary harus punya tepat {len(MODEL_ORDER)} baris, ada {len(summary)}")
+    if len(class_metrics) != len(MODEL_ORDER) * 3:
+        errors.append(
+            f"class metrics harus punya {len(MODEL_ORDER) * 3} baris, "
+            f"ada {len(class_metrics)}"
+        )
+
+    # NaN hanya boleh di baris yang memang ditandai tidak tersedia.
+    scored = summary.loc[summary["available"]]
+    if not scored[["accuracy", "brier_score", "rps", "mean_ece"]].ge(0).all().all():
         errors.append("metrik negatif ditemukan")
+    if scored[["accuracy", "log_loss", "rps", "mean_ece"]].isna().any().any():
+        errors.append("model available punya metrik NaN")
+    unavailable = summary.loc[~summary["available"]]
+    if not unavailable["rps"].isna().all():
+        errors.append("model tidak available harus punya metrik NaN")
 
     if errors:
         raise ValueError("; ".join(errors))
