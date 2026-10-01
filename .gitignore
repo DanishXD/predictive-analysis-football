@@ -6,6 +6,16 @@ __pycache__/
 data/raw/
 data/processed/
 models/
+
+# Pengecualian HANYA untuk folder deploy/ — snapshot terkurasi untuk web app
+# Streamlit Community Cloud (lihat src/build_deploy_snapshot.py). Pola
+# "models/" di atas match ke semua direktori bernama models, termasuk
+# deploy/models/, jadi folder ini harus dikecualikan secara eksplisit
+# supaya artefak web ikut ter-commit. models/ dan data/processed/ milik
+# pipeline tetap di-ignore seperti semula.
+!deploy/
+!deploy/models/
+!deploy/models/**
 downloaded_files/
 notebooks/figures/
 .pytest_cache/

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from pathlib import Path
 
 import joblib
 import numpy as np
@@ -30,19 +32,64 @@ from statistical_models import btts_probability, predict_fixture
 from value_betting import build_ml_feature_rows
 
 
+@dataclass(frozen=True)
+class _Paths:
+    """Direktori artefak, supaya CLI dan web bisa membaca snapshot yang sama.
+
+    Default menunjuk ke output pipeline (``data/processed`` dan ``models/``).
+    Web di Streamlit Community Cloud memanggil :func:`use_snapshot_directory`
+    lebih dulu supaya membaca folder ``deploy/`` yang ikut ter-commit, karena
+    kedua direktori pipeline di-gitignore dan tidak ada di repo.
+    """
+
+    processed: Path
+    models: Path
+
+
+_ACTIVE_PATHS: _Paths | None = None
+_PREDICTOR_CACHE: Predictor | None = None
+
+
+def use_snapshot_directory(snapshot_dir: str | Path) -> None:
+    """Arahkan pembacaan artefak ke folder snapshot yang ter-commit."""
+    global _ACTIVE_PATHS
+    root = Path(snapshot_dir)
+    _ACTIVE_PATHS = _Paths(processed=root, models=root / "models")
+    global _PREDICTOR_CACHE
+    _PREDICTOR_CACHE = None
+
+
+def _pipeline_paths() -> _Paths:
+    return _Paths(processed=PROCESSED_DIR, models=MODELS_DIR)
+
+
+def _paths() -> _Paths:
+    return _ACTIVE_PATHS or _pipeline_paths()
+
+
 MATCHES_PATH = PROCESSED_DIR / "matches_clean.csv"
 # cv_model_selection.csv berisi CV metrics (bukan test metrics) — dipakai untuk
 # model selection saja. evaluation_summary.csv (test metrics) tetap ada sebagai
 # artefak pelaporan final dan TIDAK boleh dipakai untuk memilih model.
 CV_SELECTION_PATH = PROCESSED_DIR / "cv_model_selection.csv"
 ELO_RATINGS_PATH = PROCESSED_DIR / "elo_current_ratings.csv"
-ML_MODEL_PATH = MODELS_DIR / "best_ml_model.pkl"
-ML_METADATA_PATH = MODELS_DIR / "best_ml_model_metadata.json"
-CORNER_MODEL_PATH = MODELS_DIR / "corner_poisson_model.pkl"
+# Nama file artefak. Direktori come dari _paths() supaya bisa diarahkan ke
+# folder deploy/ saat dipanggil dari web; lihat use_snapshot_directory().
+_MATCHES_FILENAME = "matches_clean.csv"
+_CV_SELECTION_FILENAME = "cv_model_selection.csv"
+_ELO_FILENAME = "elo_current_ratings.csv"
+_BEST_ML_FILENAME = "best_ml_model.pkl"
+_BEST_ML_METADATA_FILENAME = "best_ml_model_metadata.json"
+_CORNER_MODEL_FILENAME = "corner_poisson_model.pkl"
+_YELLOW_MODEL_FILENAME = "yellow_card_model.pkl"
 
-GOAL_MODEL_PATHS = {
-    "poisson": MODELS_DIR / "poisson_goal_model.pkl",
-    "dixon_coles": MODELS_DIR / "dixon_coles_goal_model.pkl",
+# cv_model_selection.csv berisi CV metrics (bukan test metrics) — dipakai untuk
+# model selection saja. evaluation_summary.csv (test metrics) tetap ada sebagai
+# artefak pelaporan final dan TIDAK boleh dipakai untuk memilih model.
+
+GOAL_MODEL_FILENAMES = {
+    "poisson": "poisson_goal_model.pkl",
+    "dixon_coles": "dixon_coles_goal_model.pkl",
 }
 GOAL_MODEL_CLASSES = {
     "poisson": pb.models.PoissonGoalsModel,
@@ -57,7 +104,7 @@ CLASSIFICATION_MODEL_NAMES = {
     "random_forest": "Random Forest",
     "xgboost": "XGBoost",
 }
-GOAL_MODEL_CANDIDATES = set(GOAL_MODEL_PATHS)
+GOAL_MODEL_CANDIDATES = set(GOAL_MODEL_FILENAMES)
 CLASSIFICATION_MODEL_CANDIDATES = set(CLASSIFICATION_MODEL_NAMES)
 
 
@@ -276,9 +323,199 @@ def load_match_player_predictions(
     }
 
 
+def goal_model_path(model_key: str) -> Path:
+    """Path file goal model, mengikuti direktori yang sedang aktif."""
+    return _paths().models / GOAL_MODEL_FILENAMES[model_key]
+
+
 def load_corner_model():
     """Load the saved corner Poisson model."""
-    return pb.models.PoissonGoalsModel.load(str(CORNER_MODEL_PATH))
+    return pb.models.PoissonGoalsModel.load(
+        str(_paths().models / _CORNER_MODEL_FILENAME)
+    )
+
+
+@dataclass(frozen=True)
+class Predictor:
+    """Artefak bersama yang dibutuhkan untuk satu prediksi.
+
+    Dipisah dari logika prediksi supaya CLI dan web memuat file yang sama
+    dengan cara yang sama. ``load_predictor()`` meng-cache satu instance:
+    Streamlit mengeksekusi ulang seluruh script pada setiap perubahan widget,
+    jadi tanpa cache setiap perubahan dropdown akan membaca ulang beberapa
+    CSV dan membuka ulang model.
+    """
+
+    matches: pd.DataFrame
+    cv_selection: pd.DataFrame
+    metadata: dict
+    elo_ratings: dict[str, float]
+    team_stats: pd.DataFrame
+    goal_selection: pd.Series
+    classification_selection: pd.Series
+    latest_season: str
+
+
+def load_predictor() -> Predictor:
+    """Load dan cache artefak prediksi yang dipakai bersama CLI dan web.
+
+    Pemilihan model terjadi di sini, dari ``cv_model_selection.csv``, yang
+    berisi metrik CV out-of-sample di season training. File itu TIDAK boleh
+    digantikan ``evaluation_summary.csv``: yang latter berisi metrik test
+    season, jadi memakainya untuk memilih model adalah kontaminasi test set
+    (AGENTS.md aturan keras 3).
+    """
+    global _PREDICTOR_CACHE
+    if _PREDICTOR_CACHE is not None:
+        return _PREDICTOR_CACHE
+
+    paths = _paths()
+    matches = pd.read_csv(
+        paths.processed / _MATCHES_FILENAME, parse_dates=["datetime", "date"]
+    )
+    cv_selection = pd.read_csv(paths.processed / _CV_SELECTION_FILENAME)
+    goal_selection = select_best_model(cv_selection, GOAL_MODEL_CANDIDATES)
+    classification_selection = select_best_model(
+        cv_selection, CLASSIFICATION_MODEL_CANDIDATES
+    )
+
+    metadata = json.loads(
+        (paths.models / _BEST_ML_METADATA_FILENAME).read_text(encoding="utf-8")
+    )
+    selected_classifier = classification_selection["model"]
+    if metadata["model_name"] != selected_classifier:
+        raise ValueError(
+            "Model klasifikasi terbaik dari evaluasi adalah "
+            f"{selected_classifier}, tetapi artefak tersimpan adalah "
+            f"{metadata['model_name']}. Simpan ulang model terpilih dari Fase 5."
+        )
+
+    elo_frame = pd.read_csv(paths.processed / "elo_current_ratings.csv")
+    elo_ratings = dict(zip(elo_frame["team"], elo_frame["elo_rating"]))
+
+    _PREDICTOR_CACHE = Predictor(
+        matches=matches,
+        cv_selection=cv_selection,
+        metadata=metadata,
+        elo_ratings=elo_ratings,
+        team_stats=build_team_stats(matches),
+        goal_selection=goal_selection,
+        classification_selection=classification_selection,
+        latest_season=matches["season"].max(),
+    )
+    return _PREDICTOR_CACHE
+
+
+def list_teams() -> list[str]:
+    """Tim yang pernah muncul di dataset, untuk dropdown.
+
+    Dipakai web supaya user tidak bisa salah ketik nama: CLI memvalidasi
+    input teks secara manual, dropdown membuat kategori tertutup.
+    """
+    return sorted(load_predictor().team_stats["team"].tolist())
+
+
+def get_prediction(home_team: str, away_team: str) -> dict:
+    """Hitung prediksi lengkap untuk satu pasang tim.
+
+    Fungsi ini adalah inti prediksi yang dipakai CLI maupun web, supaya
+    keduanya tidak pernah berbeda perhitungan. Prediksi pemain (key player dan
+    MOTM) TIDAK termasuk di sini: itu butuh scraping FBref saat runtime, dan
+    web v1 memang tidak menampilkannya. CLI menghitungnya sendiri lalu
+    meneruskannya ke ``print_prediction()``.
+    """
+    predictor = load_predictor()
+    matches = predictor.matches
+    metadata = predictor.metadata
+
+    prediction_datetime = get_prediction_datetime(matches)
+    fixture = pd.DataFrame(
+        [
+            {
+                "fixture_id": "interactive-fixture",
+                "season": season_for_date(prediction_datetime),
+                "datetime": prediction_datetime,
+                "team_home": home_team,
+                "team_away": away_team,
+            }
+        ]
+    )
+
+    # 1. W/D/L probabilities (ML)
+    ml_features = build_ml_feature_rows(
+        fixture,
+        matches,
+        predictor.elo_ratings,
+        metadata["feature_columns"],
+    )
+    ml_model = joblib.load(_paths().models / _BEST_ML_FILENAME)
+    probabilities = ml_model.predict_proba(
+        ml_features[metadata["feature_columns"]]
+    )[0]
+    class_to_index = {int(label): index for index, label in enumerate(ml_model.classes_)}
+    target_mapping = metadata["target_mapping"]
+    ml_probabilities = {
+        result: float(probabilities[class_to_index[int(target_mapping[result])]])
+        for result in ("H", "D", "A")
+    }
+
+    # 2. Score grid (goal model)
+    goal_model_key = predictor.goal_selection["model"]
+    goal_model = GOAL_MODEL_CLASSES[goal_model_key].load(
+        str(goal_model_path(goal_model_key))
+    )
+    score_grid, goal_cold_start = predict_fixture(
+        goal_model,
+        home_team,
+        away_team,
+        dixon_coles=goal_model_key == "dixon_coles",
+    )
+
+    # Yellow card predictions
+    yellow_threshold = YELLOW_OVER_UNDER_DEFAULT
+    try:
+        yellow_model = pb.models.PoissonGoalsModel.load(
+            str(_paths().models / _YELLOW_MODEL_FILENAME)
+        )
+        yellow_grid, yellow_cold_start = predict_yellow_fixture(
+            yellow_model, home_team, away_team
+        )
+    except (OSError, ValueError, KeyError, AttributeError):
+        yellow_grid = None
+        yellow_cold_start = False
+
+    # Corner predictions
+    corner_threshold = CORNER_OVER_UNDER_DEFAULT
+    try:
+        corner_model = load_corner_model()
+        corner_grid, corner_cold_start = predict_corner_fixture(
+            corner_model, home_team, away_team
+        )
+    except (OSError, ValueError, KeyError, AttributeError):
+        corner_grid = None
+        corner_cold_start = False
+
+    # Warnings
+    warnings = team_warnings(home_team, predictor.team_stats, predictor.latest_season)
+    warnings.extend(team_warnings(away_team, predictor.team_stats, predictor.latest_season))
+
+    return {
+        "home_team": home_team,
+        "away_team": away_team,
+        "prediction_datetime": prediction_datetime,
+        "goal_selection": predictor.goal_selection,
+        "classification_selection": predictor.classification_selection,
+        "score_grid": score_grid,
+        "ml_probabilities": ml_probabilities,
+        "yellow_grid": yellow_grid,
+        "yellow_cold_start": yellow_cold_start,
+        "yellow_threshold": yellow_threshold,
+        "corner_grid": corner_grid,
+        "corner_cold_start": corner_cold_start,
+        "corner_threshold": corner_threshold,
+        "goal_cold_start": goal_cold_start,
+        "warnings": warnings,
+    }
 
 
 def print_prediction(
@@ -465,25 +702,9 @@ def print_prediction(
 
 def main() -> None:
     """Run the interactive multi-section prediction flow."""
-    matches = pd.read_csv(MATCHES_PATH, parse_dates=["datetime", "date"])
-    cv_selection = pd.read_csv(CV_SELECTION_PATH)
-    goal_selection = select_best_model(cv_selection, GOAL_MODEL_CANDIDATES)
-    classification_selection = select_best_model(
-        cv_selection, CLASSIFICATION_MODEL_CANDIDATES
-    )
-
-    metadata = json.loads(ML_METADATA_PATH.read_text(encoding="utf-8"))
-    selected_classifier = classification_selection["model"]
-    if metadata["model_name"] != selected_classifier:
-        raise ValueError(
-            "Model klasifikasi terbaik dari evaluasi adalah "
-            f"{selected_classifier}, tetapi artefak tersimpan adalah "
-            f"{metadata['model_name']}. Simpan ulang model terpilih dari Fase 5."
-        )
-
-    team_stats = build_team_stats(matches)
-    latest_season = matches["season"].max()
-    display_teams(team_stats, latest_season)
+    predictor = load_predictor()
+    team_stats = predictor.team_stats
+    display_teams(team_stats, predictor.latest_season)
 
     try:
         team_one = prompt_team("\nPilih Tim 1 (nama/nomor): ", team_stats)
@@ -495,55 +716,14 @@ def main() -> None:
         print("\nInput dibatalkan. Tidak ada prediksi yang dibuat.")
         return
 
-    prediction_datetime = get_prediction_datetime(matches)
-    fixture = pd.DataFrame(
-        [
-            {
-                "fixture_id": "interactive-fixture",
-                "season": season_for_date(prediction_datetime),
-                "datetime": prediction_datetime,
-                "team_home": home_team,
-                "team_away": away_team,
-            }
-        ]
-    )
+    # Perhitungan inti dipakai bersama dengan web, supaya CLI dan web tidak
+    # pernah menghasilkan angka berbeda untuk INPUT YANG SAMA. Player/MOTM
+    # tetap dihitung di sini saja karena butuh scraping FBref dan tidak
+    # dipakai tampilan web.
+    result = get_prediction(home_team, away_team)
 
-    # 1. W/D/L probabilities (ML)
-    elo_frame = pd.read_csv(ELO_RATINGS_PATH)
-    elo_ratings = dict(zip(elo_frame["team"], elo_frame["elo_rating"]))
-    ml_features = build_ml_feature_rows(
-        fixture,
-        matches,
-        elo_ratings,
-        metadata["feature_columns"],
-    )
-    ml_model = joblib.load(ML_MODEL_PATH)
-    probabilities = ml_model.predict_proba(
-        ml_features[metadata["feature_columns"]]
-    )[0]
-    class_to_index = {int(label): index for index, label in enumerate(ml_model.classes_)}
-    target_mapping = metadata["target_mapping"]
-    ml_probabilities = {
-        result: float(probabilities[class_to_index[int(target_mapping[result])]])
-        for result in ("H", "D", "A")
-    }
-
-    # 2. Score grid (goal model)
-    goal_model_key = goal_selection["model"]
-    goal_model = GOAL_MODEL_CLASSES[goal_model_key].load(
-        str(GOAL_MODEL_PATHS[goal_model_key])
-    )
-    score_grid, goal_cold_start = predict_fixture(
-        goal_model,
-        home_team,
-        away_team,
-        dixon_coles=goal_model_key == "dixon_coles",
-    )
-
-    # 3. Match-level player predictions (SOT range)
     match_player_preds = load_match_player_predictions(home_team, away_team)
 
-    # 3b. MOTM candidates
     try:
         motm_result = predict_motm_candidate(home_team, away_team)
     except Exception as exc:
@@ -554,55 +734,25 @@ def main() -> None:
             "disclaimer": f"Tidak dapat memuat data ({exc})",
         }
 
-    # Yellow card predictions
-    yellow_threshold = YELLOW_OVER_UNDER_DEFAULT
-    try:
-        yellow_model = pb.models.PoissonGoalsModel.load(
-            str(MODELS_DIR / "yellow_card_model.pkl")
-        )
-        yellow_grid, yellow_cold_start = predict_yellow_fixture(
-            yellow_model, home_team, away_team
-        )
-    except (OSError, ValueError, KeyError, AttributeError) as exc:
-        print(f"Peringatan: prediksi kartu kuning dilewati ({exc})")
-        yellow_grid = None
-        yellow_cold_start = False
-
-    # Corner predictions
-    try:
-        corner_model = load_corner_model()
-        corner_grid, corner_cold_start = predict_corner_fixture(
-            corner_model, home_team, away_team
-        )
-    except (OSError, ValueError, KeyError, AttributeError) as exc:
-        print(f"Peringatan: prediksi corner dilewati ({exc})")
-        corner_grid = None
-        corner_cold_start = False
-    corner_threshold = CORNER_OVER_UNDER_DEFAULT
-
-    # Warnings
-    warnings = team_warnings(home_team, team_stats, latest_season)
-    warnings.extend(team_warnings(away_team, team_stats, latest_season))
-
     # Output
     print_prediction(
         home_team,
         away_team,
-        prediction_datetime,
-        goal_selection,
-        classification_selection,
-        score_grid,
-        ml_probabilities,
+        result["prediction_datetime"],
+        result["goal_selection"],
+        result["classification_selection"],
+        result["score_grid"],
+        result["ml_probabilities"],
         match_player_preds,
         motm_result,
-        corner_grid,
-        corner_cold_start,
-        corner_threshold,
-        yellow_grid,
-        yellow_cold_start,
-        yellow_threshold,
-        warnings,
-        goal_cold_start,
+        result["corner_grid"],
+        result["corner_cold_start"],
+        result["corner_threshold"],
+        result["yellow_grid"],
+        result["yellow_cold_start"],
+        result["yellow_threshold"],
+        result["warnings"],
+        result["goal_cold_start"],
     )
 
 

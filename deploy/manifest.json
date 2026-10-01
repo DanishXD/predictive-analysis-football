@@ -1,0 +1,67 @@
+{
+  "generated_at_utc": "2026-10-01T02:06:03Z",
+  "test_season": "2025-2026",
+  "generator": "src/build_deploy_snapshot.py",
+  "files": [
+    {
+      "file": "matches_clean.csv",
+      "source": "data/processed/matches_clean.csv",
+      "bytes": 802260,
+      "sha256": "bc03bb17b8064d095b8a7db41dc60184f60757b73e894112dcde54b827e3e518"
+    },
+    {
+      "file": "cv_model_selection.csv",
+      "source": "data/processed/cv_model_selection.csv",
+      "bytes": 990,
+      "sha256": "bca8e4d0b5cc3194999aa6eed54a5e796f3dd8231a3c0e820b9afa7b1d1dabe3"
+    },
+    {
+      "file": "evaluation_summary.csv",
+      "source": "data/processed/evaluation_summary.csv",
+      "bytes": 1195,
+      "sha256": "42c463c806223cf63c22bfe1046000648293c379f42899fd18f7a89feb75b27e"
+    },
+    {
+      "file": "elo_current_ratings.csv",
+      "source": "data/processed/elo_current_ratings.csv",
+      "bytes": 1912,
+      "sha256": "ed179670da76fafb47a8aff5eaeb163d0db7d82e3f13047f981ab92cabb7f0bd"
+    },
+    {
+      "file": "models/best_ml_model.pkl",
+      "source": "models/best_ml_model.pkl",
+      "bytes": 548561,
+      "sha256": "635b9e2bfef8be2052204cf0c79d6c6b06de031f06c6c907da9cdee467c4cc82"
+    },
+    {
+      "file": "models/best_ml_model_metadata.json",
+      "source": "models/best_ml_model_metadata.json",
+      "bytes": 1616,
+      "sha256": "7fe942d492375d925fbb70cdd3bbbab8c42104937a62ca9c86ed680c193f2780"
+    },
+    {
+      "file": "models/poisson_goal_model.pkl",
+      "source": "models/poisson_goal_model.pkl",
+      "bytes": 733336,
+      "sha256": "baab859b05841e89d47426bb9b39d507e6a21b0af17c103e25eda3dcc1a337d1"
+    },
+    {
+      "file": "models/dixon_coles_goal_model.pkl",
+      "source": "models/dixon_coles_goal_model.pkl",
+      "bytes": 733358,
+      "sha256": "a86da6c4f8847c7562248bcdb467560e13e6ed92d85986fc72232b598c54cd32"
+    },
+    {
+      "file": "models/corner_poisson_model.pkl",
+      "source": "models/corner_poisson_model.pkl",
+      "bytes": 733336,
+      "sha256": "b9a1b2066172efcab008750b922d34fb7473833a6d971e06eca6b266051e86b2"
+    },
+    {
+      "file": "models/yellow_card_model.pkl",
+      "source": "models/yellow_card_model.pkl",
+      "bytes": 733336,
+      "sha256": "e2b5b25ea143fb0899fd700d8b39b5642aff42741b8eccb2dd75174330b6b4e6"
+    }
+  ]
+}

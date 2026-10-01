@@ -1,0 +1,7 @@
+model,track,cv_log_loss_mean,cv_log_loss_std,cv_accuracy_mean,cv_accuracy_std,selection_basis,draw_recall
+xgboost,Track B,0.9803688645362854,0.0187854850818565,0.5468739758504866,0.0131637972524372,TimeSeriesSplit 5-fold CV,0.0
+random_forest,Track B,0.9826404496914186,0.0184809371599516,0.5450978084998666,0.0153423244758054,TimeSeriesSplit 5-fold CV,0.0
+logistic_regression,Track B,1.016021796475432,0.0493675725337097,0.5261990143065761,0.0254965599175699,TimeSeriesSplit 5-fold CV,0.0
+poisson,Track A,1.1037233196369967,0.04785308777317824,0.44894736842105265,0.02458801816168017,"walk-forward musiman season training saja, 5 fold (out-of-sample)",
+dixon_coles,Track A,1.1053097301551085,0.05058613019190206,0.44789473684210523,0.025877936355662174,"walk-forward musiman season training saja, 5 fold (out-of-sample)",
+elo,Track A,1.1062806462046848,0.05137682202562691,0.46157894736842103,0.041467204944058825,"walk-forward musiman season training saja, 5 fold (out-of-sample)",
